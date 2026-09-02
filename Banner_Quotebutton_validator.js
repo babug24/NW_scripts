@@ -66,6 +66,26 @@ function isBannerButtonElement(el, text, ariaText, href) {
   return isDynamicCtaCandidate({ text, ariaText, titleText: '', href });
 }
 
+async function isBreadcrumbElement(el) {
+  return el.evaluate((node) => {
+    const breadcrumbPattern = /breadcrumb|bread-crumb/i;
+    let current = node;
+    while (current && current !== document.body) {
+      const identity = [
+        current.tagName || '',
+        current.id || '',
+        typeof current.className === 'string' ? current.className : '',
+        current.getAttribute?.('aria-label') || '',
+        current.getAttribute?.('data-component') || '',
+        current.getAttribute?.('data-testid') || '',
+      ].join(' ');
+      if (breadcrumbPattern.test(identity)) return true;
+      current = current.parentElement;
+    }
+    return false;
+  }).catch(() => false);
+}
+
 function normalizeButtonText(value) {
   return normalizeText(value || '');
 }
@@ -328,7 +348,7 @@ async function getBannerContainer(page, customSelector) {
           const el = buttonCandidates.nth(i);
           const isVisible = await el.isVisible().catch(() => false);
           const isEnabled = await el.isEnabled().catch(() => true);
-          if (!isVisible || !isEnabled) continue;
+          if (!isVisible || !isEnabled || await isBreadcrumbElement(el)) continue;
 
           const text = normalizeButtonText(await el.textContent().catch(() => ''));
           const ariaText = normalizeButtonText(await el.getAttribute('aria-label').catch(() => ''));
@@ -365,7 +385,7 @@ async function discoverInteractiveElements(container) {
   for (const el of allPossible) {
     const isVisible = await el.isVisible().catch(() => false);
     const isEnabled = await el.isEnabled().catch(() => true);
-    if (!isVisible || !isEnabled) continue;
+    if (!isVisible || !isEnabled || await isBreadcrumbElement(el)) continue;
 
     const text = normalizeText(await el.textContent().catch(() => ''));
     const ariaText = normalizeText(await el.getAttribute('aria-label').catch(() => ''));
