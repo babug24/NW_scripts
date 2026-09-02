@@ -1,0 +1,1 @@
+The script is designed to validate Banner Button elements. However, based on the report, the element being validated is an ngx-web-breadcrumb element rather than a banner button. The validation logic should be refined to accurately identify and validate only Banner Button elements, excluding breadcrumb components and other unrelated elements.
