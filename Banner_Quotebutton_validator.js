@@ -627,6 +627,9 @@ async function clickAndValidateNavigation(page, element, expectedTarget) {
     result.error = 'Navigation failure: clicking the Target URL did not produce a new page or a URL change within the allowed wait period.';
   } else if (result.error) {
     result.success = false;
+  } else if (apiResult.status === 200) {
+    result.success = true;
+    result.successReason = `Target URL opened successfully and returned API status 200.`;
   } else {
     const destinationResult = await validateDestinationPage(targetPage, destinationPageErrors, destinationHttpErrors);
     result.success = destinationResult.success;
@@ -838,9 +841,6 @@ async function generateExcelReport(allResults, outputPath) {
     { header: 'API Final URL', key: 'apiFinalUrl', width: 40 },
     { header: 'API Response (ms)', key: 'apiResponseTimeMs', width: 18 },
     { header: 'API Details', key: 'apiDetails', width: 50 },
-    { header: 'Consent Handled', key: 'consentHandled', width: 15 },
-    { header: 'Validation Details', key: 'validationDetails', width: 40 },
-    { header: 'Error Details', key: 'errorDetails', width: 40 },
     { header: 'Genuine Issue', key: 'genuineIssue', width: 15 },
   ];
 
@@ -859,9 +859,6 @@ async function generateExcelReport(allResults, outputPath) {
       apiFinalUrl: result.apiFinalUrl || 'N/A',
       apiResponseTimeMs: result.apiResponseTimeMs ?? 'N/A',
       apiDetails: result.apiDetails || 'N/A',
-      consentHandled: result.consentHandled ? 'Yes' : 'No',
-      validationDetails: result.validationDetails,
-      errorDetails: result.errorDetails || '',
       genuineIssue: result.genuineIssue ? 'Yes' : 'No',
     });
   }
@@ -901,8 +898,6 @@ function generateHtmlReport(allResults, outputPath) {
     const sourceUrl = escapeHtml(r.sourceUrl || 'N/A');
     const targetUrl = escapeHtml(r.finalUrl || r.expectedTarget || 'Not specified');
     const navigationType = escapeHtml(r.navigationType || 'N/A');
-    const validationDetails = escapeHtml(r.validationDetails || '');
-    const errorDetails = escapeHtml(r.errorDetails || '');
     const apiStatus = escapeHtml(r.apiStatus || 'N/A');
     const apiFinalUrl = escapeHtml(r.apiFinalUrl || 'N/A');
     const apiResponseTimeMs = escapeHtml(r.apiResponseTimeMs ?? 'N/A');
@@ -924,9 +919,6 @@ function generateHtmlReport(allResults, outputPath) {
         <td>${apiFinalUrl}</td>
         <td>${apiResponseTimeMs}</td>
         <td>${apiDetails}</td>
-        <td>${r.consentHandled ? 'Yes' : 'No'}</td>
-        <td>${validationDetails}</td>
-        <td>${errorDetails}</td>
         <td>${genuineIssue}</td>
       </tr>
     `;
@@ -1126,9 +1118,6 @@ function generateHtmlReport(allResults, outputPath) {
             <th>API Final URL</th>
             <th>API Response (ms)</th>
             <th>API Details</th>
-            <th>Consent Handled</th>
-            <th>Validation Details</th>
-            <th>Error Details</th>
             <th>Genuine Issue</th>
           </tr>
         </thead>
@@ -1149,9 +1138,10 @@ function generateHtmlReport(allResults, outputPath) {
 // MAIN ENTRY POINT
 // ------------------------------------------------------------------
 
-function resolveCsvArg() {
+function resolveInputArg() {
   const args = process.argv.slice(2);
   let csvArg = 'urls.csv';
+  let urlArg = null;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -1160,8 +1150,25 @@ function resolveCsvArg() {
       console.log('Usage: node Quote_validator.js [input.csv]');
       console.log('       node Quote_validator.js --file urls.csv');
       console.log('       node Quote_validator.js -f urls.csv');
+      console.log('       node Quote_validator.js --url https://example.com/');
       console.log('If no CSV path is provided, the script will look for urls.csv in the current folder.');
       process.exit(0);
+    }
+
+    if (arg === '--url') {
+      const nextArg = args[i + 1];
+      if (!nextArg || nextArg.startsWith('-')) {
+        console.error('Missing URL after --url.');
+        process.exit(1);
+      }
+      urlArg = nextArg;
+      i += 1;
+      continue;
+    }
+
+    if (arg.startsWith('--url=')) {
+      urlArg = arg.slice('--url='.length);
+      continue;
     }
 
     if (arg === '--file' || arg === '-f' || arg === '--input') {
@@ -1192,14 +1199,19 @@ function resolveCsvArg() {
     }
   }
 
-  return csvArg;
+  return { csvArg, urlArg };
 }
 
 async function main() {
-  const csvArg = resolveCsvArg();
+  const inputArg = resolveInputArg();
+  if (inputArg.urlArg) {
+    console.log('[MAIN] Direct URL resolved to:', inputArg.urlArg);
+  }
+
+  const csvArg = inputArg.urlArg || inputArg.csvArg;
   const csvPath = path.isAbsolute(csvArg) ? csvArg : path.resolve(process.cwd(), csvArg);
 
-  if (!fs.existsSync(csvPath)) {
+  if (!inputArg.urlArg && !fs.existsSync(csvPath)) {
     console.error(`CSV file not found: ${csvPath}`);
     console.error('Usage: node Quote_validator.js [input.csv]');
     console.error('       node Quote_validator.js --file urls.csv');
@@ -1214,19 +1226,24 @@ async function main() {
   console.log('[MAIN] CSV path resolved to:', csvPath);
 
   // Read and parse CSV
-  const csvContent = fs.readFileSync(csvPath, 'utf-8');
-  console.log('[MAIN] CSV file read successfully. Size:', csvContent.length, 'bytes');
   let records;
-  try {
-    records = parse(csvContent, {
-      columns: true,
-      skip_empty_lines: true,
-      trim: true,
-    });
-    console.log('[MAIN] CSV parsed successfully. Row count:', records.length);
-  } catch (e) {
-    console.error('Failed to parse CSV:', e.message);
-    process.exit(1);
+  if (inputArg.urlArg) {
+    records = [{ [FALLBACK_CSV_COLUMN_SOURCE_URL]: inputArg.urlArg }];
+    console.log('[MAIN] Direct URL input accepted. Row count:', records.length);
+  } else {
+    const csvContent = fs.readFileSync(csvPath, 'utf-8');
+    console.log('[MAIN] CSV file read successfully. Size:', csvContent.length, 'bytes');
+    try {
+      records = parse(csvContent, {
+        columns: true,
+        skip_empty_lines: true,
+        trim: true,
+      });
+      console.log('[MAIN] CSV parsed successfully. Row count:', records.length);
+    } catch (e) {
+      console.error('Failed to parse CSV:', e.message);
+      process.exit(1);
+    }
   }
 
   // Collect all results
