@@ -91,7 +91,9 @@ function normalizeButtonText(value) {
 }
 
 async function getButtonText(el) {
-  const directText = normalizeButtonText(await el.textContent().catch(() => ''));
+  const directText = normalizeButtonText(
+    await el.textContent().catch(() => '') || await el.innerText().catch(() => '')
+  );
   if (directText) return directText;
 
   const ariaText = normalizeButtonText(await el.getAttribute('aria-label').catch(() => ''));
@@ -101,7 +103,11 @@ async function getButtonText(el) {
   if (titleText) return titleText;
 
   const href = await el.getAttribute('href').catch(() => '');
-  return href || '';
+  if (!href) return '';
+
+  const lastPathSegment = href.split('?')[0].split('#')[0].split('/').filter(Boolean).pop() || '';
+  if (lastPathSegment.toLowerCase() === 'about') return 'About us';
+  return lastPathSegment.replace(/[-_]+/g, ' ');
 }
 
 // CSV column names (adjust if your CSV uses different headers)
@@ -744,8 +750,8 @@ async function validateBannerOnUrl(sourceUrl, bannerSelector) {
     console.log('[VALIDATION] Step: CTA identified and being validated.');
 
     let expectedTarget = null;
-    if (text && EXPECTED_TARGETS[text]) {
-      expectedTarget = EXPECTED_TARGETS[text];
+    if (text && EXPECTED_TARGETS[text.toLowerCase()]) {
+      expectedTarget = EXPECTED_TARGETS[text.toLowerCase()];
     }
 
     console.log('[VALIDATION] Running navigation validation for CTA:', text || '(unnamed)');
