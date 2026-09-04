@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bold Penguin Button Validator – Help</title>
+    <style>
+        /* ── Reset & Base ── */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+            body {
+            font-family: 'Segoe UI', Roboto, system-ui, -apple-system, sans-serif;
+            background: linear-gradient(180deg, #edf3f9 0%, #f7f9fc 100%);
+            color: #1e293b;
+            line-height: 1.6;
+            margin: 0;
+        }
+
+        .help-shell {
+            max-width: 1500px;
+            margin: 0 auto;
+            padding: 0 1.25rem 2.5rem;
+        }
+
+        .topbar {
+            background: linear-gradient(135deg, #0B2D5C 0%, #123d72 100%);
+            color: #fff;
+            box-shadow: 0 12px 28px rgba(11, 45, 92, 0.18);
+        }
+
+        .topbar-inner {
+            max-width: 1500px;
+            margin: 0 auto;
+            padding: 2rem 1.5rem 1.5rem;
+        }
+
+        h1 {
+            font-size: clamp(2rem, 2.6vw, 3rem);
+            font-weight: 700;
+            letter-spacing: -0.03em;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            color: #ffffff;
+        }
+
+        .subtitle {
+            margin-top: 0.55rem;
+            font-size: 1.06rem;
+            color: rgba(255, 255, 255, 0.82);
+            max-width: 980px;
+            line-height: 1.5;
+        }
+
+        .page-layout {
+            display: grid;
+            grid-template-columns: 280px minmax(0, 1fr);
+            gap: 2rem;
+            max-width: 1500px;
+            margin: 2rem auto 0;
+            align-items: start;
+        }
+
+        .sidebar {
+            position: sticky;
+            top: 1.25rem;
+            background: #ffffff;
+            border: 1px solid #dfe7f2;
+            border-radius: 18px;
+            box-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
+            padding: 1rem 0.8rem;
+        }
+
+        .sidebar-title {
+            font-size: 0.82rem;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            font-weight: 700;
+            color: #0B2D5C;
+            margin: 0.25rem 0.9rem 0.75rem;
+        }
+
+        .toc-nav {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .nav-link {
+            display: block;
+            padding: 0.7rem 0.9rem;
+            border-radius: 10px;
+            color: #334155;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.95rem;
+            transition: all 0.2s ease;
+            border-left: 3px solid transparent;
+        }
+
+        .nav-link:hover {
+            text-decoration: none;
+            background: #edf4ff;
+            color: #0B2D5C;
+        }
+
+        .nav-link.active {
+            background: #eaf1ff;
+            color: #0B2D5C;
+            border-left-color: #0B2D5C;
+            box-shadow: inset 0 0 0 1px rgba(11, 45, 92, 0.06);
+        }
+
+        .content-panel {
+            background: #ffffff;
+            border-radius: 24px;
+            box-shadow: 0 12px 40px rgba(15, 23, 42, 0.08);
+            padding: 2.4rem clamp(1.2rem, 2vw, 2.8rem);
+        }
+
+        .container {
+            max-width: none;
+            margin: 0;
+            background: transparent;
+            border-radius: 0;
+            box-shadow: none;
+            padding: 0;
+        }
+
+        @media (max-width: 960px) {
+            .page-layout {
+                grid-template-columns: 1fr;
+            }
+
+            .sidebar {
+                position: static;
+            }
+
+            .toc-nav {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            }
+        }
+
+        @media (max-width: 768px) {
+            .help-shell { padding: 0 0.9rem 2rem; }
+            .topbar-inner { padding: 1.5rem 1rem; }
+            .content-panel { padding: 1.5rem 1rem; }
+            .subtitle { font-size: 0.98rem; }
+        }
+
+        /* ── Typography ── */
+        h2 {
+            font-size: 1.8rem;
+            font-weight: 700;
+            margin-top: 2.5rem;
+            margin-bottom: 1rem;
+            padding-bottom: 0.6rem;
+            border-bottom: 3px solid #e9edf2;
+            color: #0f172a;
+        }
+        h3 {
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin-top: 1.8rem;
+            margin-bottom: 0.75rem;
+            color: #1e293b;
+        }
+        h4 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-top: 1.2rem;
+            margin-bottom: 0.4rem;
+            color: #334155;
+        }
+        p, li {
+            color: #334155;
+        }
+        a {
+            color: #2563eb;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+
+        /* ── Badges & tags ── */
+        .badge {
+            display: inline-block;
+            padding: 0.2rem 0.8rem;
+            border-radius: 30px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            background: #e9edf2;
+            color: #334155;
+        }
+        .badge-green { background: #d1fae5; color: #065f46; }
+        .badge-red   { background: #fee2e2; color: #991b1b; }
+        .badge-blue  { background: #dbeafe; color: #1e40af; }
+        .badge-amber { background: #fef3c7; color: #92400e; }
+
+        /* ── Code & Pre ── */
+        code {
+            background: #f1f5f9;
+            padding: 0.2rem 0.5rem;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            color: #0f172a;
+            font-family: 'Fira Code', 'JetBrains Mono', monospace;
+        }
+        pre {
+            background: #0f172a;
+            color: #e2e8f0;
+            padding: 1.2rem 1.5rem;
+            border-radius: 12px;
+            overflow-x: auto;
+            font-size: 0.9rem;
+            line-height: 1.5;
+            margin: 1rem 0;
+            font-family: 'Fira Code', 'JetBrains Mono', monospace;
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: inherit;
+            font-size: inherit;
+        }
+
+        /* ── Tables ── */
+        .table-wrap {
+            overflow-x: auto;
+            margin: 1.2rem 0;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.95rem;
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+        }
+        th {
+            background: #f1f5f9;
+            font-weight: 600;
+            padding: 0.75rem 1rem;
+            text-align: left;
+            border-bottom: 2px solid #e2e8f0;
+        }
+        td {
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid #e9edf2;
+            vertical-align: top;
+        }
+        tr:last-child td { border-bottom: none; }
+
+        /* ── Cards / callouts ── */
+        .callout {
+            background: #f8fafc;
+            border-left: 5px solid #2563eb;
+            padding: 1rem 1.5rem;
+            border-radius: 8px;
+            margin: 1.2rem 0;
+        }
+        .callout.warning {
+            border-left-color: #f59e0b;
+            background: #fffbeb;
+        }
+        .callout.success {
+            border-left-color: #22c55e;
+            background: #f0fdf4;
+        }
+        .callout.danger {
+            border-left-color: #ef4444;
+            background: #fef2f2;
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            margin: 1.2rem 0;
+        }
+        @media (max-width: 768px) {
+            .grid-2 { grid-template-columns: 1fr; }
+        }
+
+        /* ── Misc ── */
+        .hr {
+            border: none;
+            border-top: 2px dashed #e2e8f0;
+            margin: 2rem 0;
+        }
+        .toc {
+            background: #f8fafc;
+            padding: 1rem 1.5rem;
+            border-radius: 12px;
+            margin: 1.5rem 0;
+        }
+        .toc ul {
+            list-style: none;
+            padding-left: 1rem;
+        }
+        .toc li {
+            margin: 0.3rem 0;
+        }
+        .toc a {
+            font-weight: 500;
+        }
+
+        .footer {
+            margin-top: 3rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid #e2e8f0;
+            font-size: 0.9rem;
+            color: #64748b;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+<div class="help-shell">
+    <header class="topbar">
+        <div class="topbar-inner">
+            <h1>🧪 Bold Penguin Button Validator – Help &amp; Reference</h1>
+            <p class="subtitle">
+                Automated validation of <strong>“Start your quote”</strong> CTAs and related
+                navigation flows on Nationwide websites.
+            </p>
+        </div>
+    </header>
+
+    <div class="page-layout">
+        <aside class="sidebar" aria-label="Page contents">
+            <div class="sidebar-title">Contents</div>
+            <nav class="toc-nav">
+                <a class="nav-link active" href="#intro">1. Introduction</a>
+                <a class="nav-link" href="#features">2. Features</a>
+                <a class="nav-link" href="#test-coverage">3. Test Coverage</a>
+                <a class="nav-link" href="#prereqs">4. Prerequisites</a>
+                <a class="nav-link" href="#setup">5. Setup &amp; Installation</a>
+                <a class="nav-link" href="#usage">6. Usage (Command Line)</a>
+                <a class="nav-link" href="#validation">7. Validation Process</a>
+                <a class="nav-link" href="#rules">8. Validation Rules</a>
+                <a class="nav-link" href="#interpret">9. Interpreting Results</a>
+                <a class="nav-link" href="#reports">10. Reports</a>
+                <a class="nav-link" href="#troubleshoot">11. Troubleshooting</a>
+                <a class="nav-link" href="#faq">12. FAQ</a>
+            </nav>
+        </aside>
+
+        <main class="content-panel">
+            <div class="container">
+
+    <!-- ==================== 1. INTRO ==================== -->
+    <h2 id="intro">1. Introduction</h2>
+    <p>
+        The <strong>Bold Penguin Button Validator</strong> is a Node.js automation tool
+        that validates the presence and behaviour of the
+        <code>&lt;a class="button nw-button--mint-dark bold-penguin-quote"&gt;Start your quote&lt;/a&gt;</code>
+        button on a list of URLs. It also tests other related CTAs (SmallCTA, StickyCTA)
+        and verifies that clicking them leads to a valid page and that the browser’s
+        <strong>back navigation</strong> works correctly.
+    </p>
+    <p>
+        The tool is designed for <strong>QA engineers, developers, and business
+        stakeholders</strong> who need to ensure quote‑initiation flows are functional
+        across many pages. It produces detailed HTML, CSV, and Excel reports with
+        screenshots for easy review.
+    </p>
+
+    <!-- ==================== 2. FEATURES ==================== -->
+    <h2 id="features">2. Features</h2>
+    <div class="grid-2">
+        <div>
+            <h4>🔍 Core Validation</h4>
+            <ul>
+                <li>Locates the Bold‑Penguin “Start your quote” button using multiple selectors (class, text, href).</li>
+                <li>Detects the <strong>actual CTA name displayed on the page</strong> dynamically, instead of relying on a fixed label.</li>
+                <li>Inspects the DOM for the presence of a <code>bold-penguin-quote</code> element and records <code>Yes</code> or <code>No</code>.</li>
+                <li>Simulates a click and detects:
+                    <ul>
+                        <li>Same‑tab navigation</li>
+                        <li>New‑tab opening</li>
+                        <li>No navigation (with fallback checks)</li>
+                    </ul>
+                </li>
+                <li>Verifies the destination page is not an error page (404, 500, etc.).</li>
+                <li>Uses the browser <strong>back button</strong> to return to the original page and verifies success.</li>
+            </ul>
+        </div>
+        <div>
+            <h4>🧹 Environment Handling</h4>
+            <ul>
+                <li>Closes cookie banners (TrustArc) and generic overlays automatically.</li>
+                <li>Waits for spinners / loaders to disappear (configurable timeout).</li>
+                <li>Retries navigation (up to 2 attempts) on failure.</li>
+                <li>Clears cookies between test runs to avoid state contamination.</li>
+            </ul>
+            <h4 style="margin-top:0.8rem;">📊 Reporting</h4>
+            <ul>
+                <li>Generates <strong>HTML</strong>, <strong>CSV</strong>, and <strong>Excel</strong> reports.</li>
+                <li>Captures full‑page screenshots for each URL (stored in <code>screenshots/</code>).</li>
+                <li>Shows per‑URL status for: overall, Bold‑Penguin button, SmallCTA, StickyCTA, and back‑navigation.</li>
+                <li>Includes the <strong>API URL</strong> (the <code>href</code> of the button) in the report.</li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- ==================== TEST COVERAGE ==================== -->
+    <h2 id="test-coverage">Test Coverage</h2>
+    <p>
+        The validator is designed to cover the most common user journeys and failure points associated with the
+        Bold Penguin quote flow. It validates each page against the expected behavior for the main CTA as well as
+        related CTAs that may also initiate the quote process.
+    </p>
+
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Coverage area</th>
+                    <th>What the test checks</th>
+                    <th>Expected result</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Main Bold Penguin CTA</strong></td>
+                    <td>Button presence, visibility, clickability, and navigation behavior for the primary “Start your quote” CTA.</td>
+                    <td>Button is found, clicked successfully, and lands on a valid destination page.</td>
+                </tr>
+                <tr>
+                    <td><strong>CTA selection logic</strong></td>
+                    <td>Finds CTA elements by class names, text, fallback selectors, and alternative quote-related patterns.</td>
+                    <td>Tool correctly identifies the active quote button even if markup varies.</td>
+                </tr>
+                <tr>
+                    <td><strong>Same-tab navigation</strong></td>
+                    <td>Validates when the user is redirected within the same browser tab.</td>
+                    <td>Page loads successfully and the original URL is restored after back navigation.</td>
+                </tr>
+                <tr>
+                    <td><strong>New-tab navigation</strong></td>
+                    <td>Handles CTA actions that open a new tab or window.</td>
+                    <td>New tab opens without an error page, then closes cleanly and leaves the page in a stable state.</td>
+                </tr>
+                <tr>
+                    <td><strong>No-navigation cases</strong></td>
+                    <td>Detects links or buttons that do not navigate when clicked and flags unexpected behavior.</td>
+                    <td>Either a valid fallback action occurs, or the action is marked as a failure.</td>
+                </tr>
+                <tr>
+                    <td><strong>Error-page detection</strong></td>
+                    <td>Checks URL, page title, and body text for 404s, 500s, “Page Not Found,” and other error states.</td>
+                    <td>Pages with known error markers are marked as FAIL and reported clearly.</td>
+                </tr>
+                <tr>
+                    <td><strong>Back-navigation validation</strong></td>
+                    <td>Confirms that the browser back button returns the user to the originating page correctly.</td>
+                    <td>Original URL is restored without a broken state or unexpected redirect.</td>
+                </tr>
+                <tr>
+                    <td><strong>Small CTA validation</strong></td>
+                    <td>Tests small CTA components such as inline CTA wrappers and related quote actions.</td>
+                    <td>Each CTA is clicked and validated individually for navigation success and proper return flow.</td>
+                </tr>
+                <tr>
+                    <td><strong>Sticky CTA validation</strong></td>
+                    <td>Finds sticky CTA banners and blue banner-style callouts that may lead into the quote flow.</td>
+                    <td>Sticky CTAs are validated for behavior, destination integrity, and return navigation.</td>
+                </tr>
+                <tr>
+                    <td><strong>Destination URL verification</strong></td>
+                    <td>Loads the final destination URLs for the CTA flow to confirm they resolve correctly.</td>
+                    <td>Final URLs load normally and do not return server or content errors.</td>
+                </tr>
+                <tr>
+                    <td><strong>Overlay handling</strong></td>
+                    <td>Closes cookie consent banners, modals, and generic overlays that can block user interaction.</td>
+                    <td>Page can be accessed and the CTA can be interacted with without overlay interference.</td>
+                </tr>
+                <tr>
+                    <td><strong>Spinner / load-state validation</strong></td>
+                    <td>Waits for spinners and loading indicators to disappear before proceeding with CTA validation.</td>
+                    <td>Tool does not test the CTA prematurely while the page is still settling.</td>
+                </tr>
+                <tr>
+                    <td><strong>Desktop and mobile behavior</strong></td>
+                    <td>Runs on desktop by default and can emulate mobile viewport when needed.</td>
+                    <td>CTA behavior is checked under the selected browser conditions with consistent reporting.</td>
+                </tr>
+                <tr>
+                    <td><strong>Reporting and evidence capture</strong></td>
+                    <td>Captures screenshots and stores results in HTML, CSV, and Excel report files.</td>
+                    <td>QA and stakeholders have traceable proof of pass/fail status and destination behavior.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="callout success">
+        ✅ <strong>Coverage summary:</strong> The tool validates the main quote entry point, supporting CTA components,
+        page load quality, browser back-navigation flow, and final destination integrity — the key elements needed to
+        confidently assess quote funnel health for a page.
+    </div>
+
+    <!-- ==================== 3. PREREQUISITES ==================== -->
+    <h2 id="prereqs">3. Prerequisites</h2>
+    <ul>
+        <li><strong>Node.js</strong> v16 or higher (includes <code>npm</code>).</li>
+        <li><strong>Playwright</strong> – the tool uses Playwright to control Chromium. The required browsers are downloaded automatically on first run.</li>
+        <li>A <strong>CSV file</strong> containing a column named <code>URL</code> with the list of pages to test.</li>
+        <li>Internet access (to load the target pages and download Playwright browsers).</li>
+    </ul>
+
+    <!-- ==================== 4. SETUP ==================== -->
+    <h2 id="setup">4. Setup &amp; Installation</h2>
+    <ol>
+        <li><strong>Clone or download</strong> the script (e.g., <code>bold-penguin-button-validator1.js</code>).</li>
+        <li>Open a terminal in the project folder.</li>
+        <li>Install dependencies:
+            <pre><code>npm install playwright csv-parse xlsx</code></pre>
+        </li>
+        <li>Install Playwright browsers (if not already done):
+            <pre><code>npx playwright install chromium</code></pre>
+        </li>
+        <li>Prepare your CSV file with a header <code>URL</code> and one URL per row.</li>
+    </ol>
+    <div class="callout success">
+        ✅ <strong>Example CSV</strong> (<code>urls.csv</code>):
+        <pre style="background:#f1f5f9; color:#0f172a; padding:0.5rem 1rem; margin-top:0.5rem;">URL
+https://www.nationwide.com/business/solutions-center/management/commercial-vehicle-quote
+https://www.nationwide.com/personal/investing/annuities/fixed-indexed/</pre>
+    </div>
+
+    <!-- ==================== 5. USAGE ==================== -->
+    <h2 id="usage">5. Usage (Command Line)</h2>
+    <p>Run the script with Node, optionally passing arguments:</p>
+    <pre><code>node bold-penguin-button-validator1.js [options] [csv-file]</code></pre>
+
+    <h4>Available options</h4>
+    <table>
+        <thead><tr><th>Option</th><th>Description</th></tr></thead>
+        <tbody>
+            <tr><td><code>--file &lt;filename&gt;</code> or <code>--csv &lt;filename&gt;</code></td><td>Specify a custom CSV file (default: <code>urls.csv</code>).</td></tr>
+            <tr><td><code>--mobile</code> or <code>-m</code></td><td>Emulate an iPhone 12 viewport (mobile testing).</td></tr>
+            <tr><td><code>--headed</code> or <code>-h</code></td><td>Run with a visible browser window (headless by default).</td></tr>
+            <tr><td><code>--report</code> or <code>--results</code></td><td>Enable report generation (default).</td></tr>
+            <tr><td><em>(no flag)</em></td><td>If you pass a bare filename, it is treated as the CSV input.</td></tr>
+        </tbody>
+    </table>
+
+    <h4>Examples</h4>
+    <pre><code># Use default urls.csv, headless, desktop mode
+node bold-penguin-button-validator1.js
+
+# Use a custom CSV, mobile emulation, headed mode
+node bold-penguin-button-validator1.js --mobile --headed --file my-urls.csv
+
+# Run in headless, desktop, with report generation (default)
+node bold-penguin-button-validator1.js --report</code></pre>
+
+    <div class="callout warning">
+        ⚠️ <strong>Headed mode may be blocked</strong> by Windows Application Control policy.
+        If you see an error about “Chrome DLL” or “Application Control policy”,
+        the tool will automatically fall back to headless mode.
+    </div>
+
+    <!-- ==================== 6. VALIDATION PROCESS ==================== -->
+    <h2 id="validation">6. Validation Process</h2>
+    <p>For each URL in the CSV, the tool performs the following steps:</p>
+    <ol>
+        <li><strong>Navigate</strong> to the URL with retries (max 2).</li>
+        <li><strong>Wait for page to settle</strong> – waits for DOM, load, network idle, and spinners to disappear.</li>
+        <li><strong>Check DOM presence</strong> – scans the page for a <code>bold-penguin-quote</code> element and records <code>Yes</code> or <code>No</code>.</li>
+        <li><strong>Handle overlays</strong> – closes TrustArc cookie banners and generic popups.</li>
+        <li><strong>Check for error page</strong> – scans URL, title, and body for 404, 500, “Page Not Found”, etc. If found, marks the page as <code>FAIL</code> and skips further testing.</li>
+        <li><strong>Validate Bold‑Penguin button</strong>:
+            <ul>
+                <li>Locate the button using multiple selectors.</li>
+                <li>Click it and detect navigation (same tab, new tab, or none).</li>
+                <li>If navigation occurs, verify the destination page is valid (no error).</li>
+                <li>Attempt <strong>back navigation</strong> to return to the original URL and verify success.</li>
+            </ul>
+        </li>
+        <li><strong>Validate SmallCTA and StickyCTA</strong> – finds all CTAs inside <code>&lt;ngx-web-small-cta&gt;</code> and sticky blue banners, clicks each, and again checks back‑navigation.</li>
+        <li><strong>Validate destination URLs</strong> – each final URL from the button/CTAs is visited separately to confirm it loads correctly.</li>
+        <li><strong>Take screenshot</strong> – full‑page screenshot saved to <code>screenshots/</code>.</li>
+        <li><strong>Clear cookies</strong> – reset state for the next URL.</li>
+    </ol>
+
+    <div class="callout">
+        💡 <strong>Note:</strong> The tool uses a <code>requireQuote</code> flag for the main button – it expects navigation to a quote page. If no navigation occurs and <code>requireQuote</code> is <code>true</code>, the test fails.
+    </div>
+
+    <!-- ==================== 7. VALIDATION RULES ==================== -->
+    <h2 id="rules">7. Validation Rules</h2>
+    <p>The tool applies the following rules to determine <strong>PASS</strong>, <strong>FAIL</strong>, or <strong>N/A</strong>:</p>
+
+    <h4>Overall Status</h4>
+    <ul>
+        <li><strong>PASS</strong> – All applicable tests (main button, CTAs, back‑nav, destination URLs) succeeded.</li>
+        <li><strong>FAIL</strong> – At least one test failed (e.g., button missing, click leads to error page, back‑navigation fails).</li>
+        <li><strong>N/A</strong> – No applicable tests (e.g., button not found, all CTAs skipped as tel/mailto).</li>
+    </ul>
+
+    <h4>Bold‑Penguin Button Status</h4>
+    <ul>
+        <li><strong>PASS</strong> – Button found, clicked, destination page is valid, and back‑navigation succeeded.</li>
+        <li><strong>FAIL</strong> – Any failure: button not found, click error, destination error, or back‑navigation failure.</li>
+        <li><strong>N/A</strong> – Button not present (or skipped because it’s a <code>tel:</code>/<code>mailto:</code> link).</li>
+    </ul>
+
+    <h4>Back Navigation Status</h4>
+    <ul>
+        <li><strong>SUCCESS</strong> – Click led to navigation and then <code>page.goBack()</code> correctly returned to the original URL.</li>
+        <li><strong>FAIL</strong> – Back button did not restore the original URL, or an error occurred.</li>
+        <li><strong>N/A</strong> – Not applicable (e.g., button skipped, no navigation).</li>
+    </ul>
+
+    <h4>SmallCTA / StickyCTA Status</h4>
+    <ul>
+        <li><strong>PASS</strong> – All CTAs in that category were successfully clicked and back‑navigation passed.</li>
+        <li><strong>FAIL</strong> – At least one CTA in that category failed.</li>
+        <li><strong>N/A</strong> – No CTAs found in that category (or all skipped as tel/mailto).</li>
+    </ul>
+
+    <div class="callout warning">
+        ⚠️ <strong>Important</strong> – The tool does <em>not</em> artificially pass failed tests. If a genuine validation fails, the result will be <strong>FAIL</strong> with a clear error description.
+    </div>
+
+    <!-- ==================== 8. INTERPRETING RESULTS ==================== -->
+    <h2 id="interpret">8. Interpreting Results</h2>
+    <p>After the run, you’ll see a summary in the terminal and reports generated in the <code>reports/</code> folder.</p>
+
+    <h4>Terminal Output</h4>
+    <p>For each URL, you’ll see logs like:</p>
+    <pre style="background:#1e293b; color:#e2e8f0; font-size:0.9rem;">
+📍 [1] Testing: https://www.nationwide.com/business/...
+============================================================
+  🌐 Navigating to ... (attempt 1/2)
+  ✅ Page settled
+  🔍 Checking for overlays ...
+  🔵 Testing bold-penguin...
+  ✅ bold-penguin found in DOM using selector: a.button...
+  🔘 Testing: "bold-penguin"
+  📍 Clicking: /business/insurance/...
+  📄 Navigation in same tab
+  ⬅️ Navigating back ...
+  ✅ Successfully returned to original URL via back button
+  ✅ bold-penguin test PASSED (back: SUCCESS)
+📊 Overall Status: PASS
+📸 Screenshot saved: screenshots/screenshot_1_1642345678.png
+    </pre>
+
+    <h4>Report Columns</h4>
+    <p>The HTML/Excel/CSV reports include the following key columns:</p>
+    <ul>
+        <li><strong>URL</strong> – The tested page.</li>
+        <li><strong>bold-penguin</strong> – <code>Yes</code> if a <code>bold-penguin-quote</code> DOM element is present, otherwise <code>No</code>.</li>
+        <li><strong>Overall</strong> – PASS/FAIL/N/A.</li>
+        <li><strong>Main CTA</strong> – Status of the primary page CTA.</li>
+        <li><strong>Detected Button Name</strong> – The actual button label detected on the page, such as <code>Start your quote</code>, <code>Find a professional</code>, or another real CTA text.</li>
+        <li><strong>bold-penguin API URL</strong> – The resolved <code>href</code> of the button (the target endpoint).</li>
+        <li><strong>bold-penguin Final URL</strong> – The URL after clicking (if navigation occurred).</li>
+        <li><strong>Back Nav</strong> – SUCCESS/FAIL/N/A for back‑navigation.</li>
+        <li><strong>SmallCTA Status</strong> and <strong>SmallCTA URLs</strong> – results for the small CTA component.</li>
+        <li><strong>StickyCTA Status</strong> and <strong>StickyCTA URLs</strong> – results for the sticky CTA banner.</li>
+        <li><strong>Failure Details</strong> – Concise error messages explaining any failures.</li>
+    </ul>
+
+    <!-- ==================== 9. REPORTS ==================== -->
+    <h2 id="reports">9. Reports</h2>
+    <p>All reports are saved in the <code>reports/</code> directory with a timestamp.</p>
+    <ul>
+        <li><strong>HTML</strong> – A styled, self‑contained page with summary cards and a sortable table. Ideal for sharing with stakeholders.</li>
+        <li><strong>CSV</strong> – Machine‑readable, can be opened in Excel or used for further analysis.</li>
+        <li><strong>Excel</strong> – Same data as CSV, formatted as a worksheet.</li>
+    </ul>
+    <p>Screenshots are stored in <code>screenshots/</code> and referenced in the HTML report (as links).</p>
+    <div class="callout">
+        📁 <strong>Folder structure after a run:</strong>
+        <pre style="background:#f1f5f9; color:#0f172a; padding:0.5rem 1rem; margin-top:0.5rem;">
+project/
+├── bold-penguin-button-validator1.js
+├── urls.csv
+├── reports/
+│   ├── bold-penguin-quote_report_20260109_143022.html
+│   ├── bold-penguin-quote_report_20260109_143022.csv
+│   └── bold-penguin-quote_report_20260109_143022.xlsx
+└── screenshots/
+    ├── screenshot_1_1642345678.png
+    ├── screenshot_1_1642345678_FAIL.png   (if failure)
+    └── ...
+        </pre>
+    </div>
+
+    <!-- ==================== 10. TROUBLESHOOTING ==================== -->
+    <h2 id="troubleshoot">10. Troubleshooting</h2>
+
+    <h4>Script fails to launch Chromium in headed mode</h4>
+    <p>
+        On some Windows environments, Chromium is blocked by Application Control policy.
+        The tool will automatically fall back to headless mode. To avoid this, run with
+        <code>--headed</code> only if you are sure the policy allows it.
+    </p>
+
+    <h4>CSV file not found</h4>
+    <p>Make sure the CSV file exists and the path is correct. The default is <code>urls.csv</code> in the same folder.</p>
+
+    <h4>Button not found (N/A)</h4>
+    <p>This can happen if the page uses a different selector or the button is hidden behind a login. Check the page manually to confirm.</p>
+
+    <h4>Back navigation fails (FAIL)</h4>
+    <p>This often occurs with:</p>
+    <ul>
+        <li><strong>External links</strong> – clicking a link to a different domain (e.g., <code>semsee.com</code>). The back button may not return to the original page.</li>
+        <li><strong>Single‑page apps</strong> that use <code>history.replaceState</code> – the back button may not work as expected.</li>
+        <li><strong>Redirects</strong> – if the destination page redirects, the back history may be altered.</li>
+    </ul>
+    <p>The tool logs the exact reason (e.g., “Back navigation resulted in URL X instead of Y”).</p>
+
+    <h4>Spinner detection timeout</h4>
+    <p>If a page has a permanent spinner, the test will time out and mark the page as <code>FAIL</code>. You can adjust the timeout in the configuration (<code>NAV_TIMEOUT</code>, <code>PRESENCE_TIMEOUT</code>) if needed.</p>
+
+    <!-- ==================== 11. FAQ ==================== -->
+    <h2 id="faq">11. FAQ</h2>
+
+    <h4>Q: What does the <code>bold-penguin</code> column mean?</h4>
+    <p>A: It indicates whether the page DOM contains an element matching <code>bold-penguin-quote</code>. The value is <code>Yes</code> or <code>No</code>, and it is reported separately from the functional validation results.</p>
+
+    <h4>Q: What does “bold-penguin API URL” mean?</h4>
+    <p>A: It is the resolved <code>href</code> attribute of the “Start your quote” button. This is often the endpoint that initiates the quote process (e.g., a Semsee or Bold Penguin API URL).</p>
+
+    <h4>Q: Why does the tool test SmallCTA and StickyCTA?</h4>
+    <p>A: These are common components on Nationwide pages that also contain quote‑initiation links. The tool ensures <em>all</em> ways a user can start a quote are working.</p>
+
+    <h4>Q: Can I run the tool on a staging environment?</h4>
+    <p>A: Yes – simply provide the staging URLs in the CSV. The tool does not care about the domain.</p>
+
+    <h4>Q: What if the button is a <code>&lt;button&gt;</code> not an <code>&lt;a&gt;</code>?</h4>
+    <p>A: The tool looks for both <code>&lt;a&gt;</code> and <code>&lt;button&gt;</code> with the relevant classes/text. If it’s a <code>&lt;button&gt;</code> without <code>href</code>, the “API URL” column will be empty, but the click and navigation will still be tested.</p>
+
+    <h4>Q: How do I increase timeouts for slow pages?</h4>
+    <p>A: Edit the constants at the top of the script: <code>NAV_TIMEOUT</code>, <code>BUTTON_TIMEOUT</code>, <code>PRESENCE_TIMEOUT</code>. Increase their values (in milliseconds).</p>
+
+    <h4>Q: Can I test multiple URLs in parallel?</h4>
+    <p>A: The current version runs sequentially. For parallel execution, you would need to modify the script to use workers (not included in this help).</p>
+
+    <h4>Q: Where can I find the full validation logic?</h4>
+    <p>A: Review the source code – it is well‑commented. Key functions are <code>validateMainButton</code>, <code>validateButtonClick</code>, and <code>validateSmallCta</code>.</p>
+
+    <hr class="hr" />
+
+    <!-- ==================== FOOTER ==================== -->
+    <div class="footer">
+        <p>
+            Bold Penguin Button Validator &mdash; Version 1.0<br />
+        </p>
+    </div>
+
+            </div>
+        </main>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const navLinks = Array.from(document.querySelectorAll('.nav-link'));
+        const sections = Array.from(document.querySelectorAll('h2[id], h3[id]'));
+
+        if (!navLinks.length || !sections.length) return;
+
+        function updateActiveLink() {
+            const scrollPosition = window.scrollY + 140;
+            let currentId = sections[0]?.id || '';
+
+            for (let i = 0; i < sections.length; i++) {
+                const section = sections[i];
+                const nextSection = sections[i + 1];
+                const sectionTop = section.offsetTop;
+                const sectionBottom = nextSection ? nextSection.offsetTop : Number.MAX_SAFE_INTEGER;
+
+                if (scrollPosition >= sectionTop && scrollPosition < sectionBottom) {
+                    currentId = section.id;
+                    break;
+                }
+            }
+
+            navLinks.forEach(link => {
+                const isActive = link.getAttribute('href') === '#' + currentId;
+                link.classList.toggle('active', isActive);
+            });
+        }
+
+        updateActiveLink();
+        window.addEventListener('scroll', updateActiveLink, { passive: true });
+    });
+</script>
+</body>
+</html>
