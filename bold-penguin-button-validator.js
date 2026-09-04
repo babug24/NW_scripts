@@ -383,6 +383,25 @@ async function validateButtonClick(page, locator, description, requireQuote = tr
   }
 }
 
+// ---------- Check whether a bold-penguin-quote DOM element exists ----------
+async function detectBoldPenguinDomPresence(page) {
+  try {
+    return await page.evaluate(() => {
+      const selectors = [
+        '[class*="bold-penguin-quote"]',
+        '[class*="bold-penguin"]',
+        '[id*="bold-penguin-quote"]',
+        '[id*="bold-penguin"]',
+        '[data-testid*="bold-penguin-quote"]',
+        '[data-name*="bold-penguin-quote"]'
+      ];
+      return document.querySelector(selectors.join(',')) !== null;
+    });
+  } catch (_) {
+    return false;
+  }
+}
+
 // ---------- Locate bold-penguin CTA ----------
 async function findBoldPenguinLocator(page) {
   const selectorCandidates = [
@@ -427,21 +446,67 @@ async function findBoldPenguinLocator(page) {
   return null;
 }
 
+async function getDetectedButtonName(locator, fallbackName = 'Main CTA') {
+  if (!locator) return fallbackName;
+
+  try {
+    const detected = await locator.evaluate((node) => {
+      if (!node) return '';
+      const candidates = [
+        (node.textContent || '').replace(/\s+/g, ' ').trim(),
+        node.getAttribute ? node.getAttribute('aria-label') : '',
+        node.getAttribute ? node.getAttribute('title') : '',
+        node.getAttribute ? node.getAttribute('alt') : '',
+        node.getAttribute ? node.getAttribute('data-testid') : '',
+        node.getAttribute ? node.getAttribute('data-name') : '',
+        node.getAttribute ? node.getAttribute('name') : '',
+        node.value || ''
+      ].filter(Boolean);
+
+      const cleaned = candidates
+        .map(value => String(value).trim())
+        .find(value => value && !['button', 'submit', 'click', 'link'].includes(value.toLowerCase()));
+
+      return cleaned || '';
+    });
+
+    if (detected && detected.trim()) return detected.trim();
+  } catch (_) {}
+
+  try {
+    const href = await locator.getAttribute('href').catch(() => '');
+    if (href && href !== '#') return href;
+  } catch (_) {}
+
+  return fallbackName;
+}
+
 // ---------- Validate main button ----------
 async function validateMainButton(page, url) {
-  console.log(`\n  🔵 Testing bold-penguin...`);
-  const result = { status: 'N/A', error: '', finalUrl: '', title: '', backNavigation: 'N/A', backError: '', backUrl: '' };
+  console.log(`\n  🔵 Testing main quote CTA...`);
+  const result = {
+    status: 'N/A',
+    error: '',
+    finalUrl: '',
+    title: '',
+    backNavigation: 'N/A',
+    backError: '',
+    backUrl: '',
+    apiUrl: '',
+    buttonName: 'Main CTA'
+  };
   try {
     const mainLink = await findBoldPenguinLocator(page);
     if (!mainLink) {
       result.status = 'N/A';
       result.error = 'Button not present';
-      console.log(`  ℹ️ bold-penguin not present`);
+      console.log(`  ℹ️ quote CTA not present`);
       return result;
     }
     const { selector, locator } = mainLink;
-    console.log(`  ✅ bold-penguin found in DOM using selector: ${selector}`);
-    const clickResult = await validateButtonClick(page, locator, 'bold-penguin', true, url);
+    result.buttonName = await getDetectedButtonName(locator, 'Main CTA');
+    console.log(`  ✅ CTA detected in DOM using selector: ${selector} | Name: ${result.buttonName}`);
+    const clickResult = await validateButtonClick(page, locator, result.buttonName, true, url);
     if (!clickResult.success) throw new Error(clickResult.error);
     if (clickResult.skipped) {
       result.status = 'N/A';
@@ -449,6 +514,15 @@ async function validateMainButton(page, url) {
       result.backNavigation = 'N/A';
       return result;
     }
+    // Resolve the href to an absolute URL for the API endpoint
+    let apiUrl = clickResult.href || '';
+    if (apiUrl && !apiUrl.startsWith('http') && !apiUrl.startsWith('tel:') && !apiUrl.startsWith('mailto:')) {
+      try {
+        apiUrl = new URL(apiUrl, page.url()).href;
+      } catch (_) {}
+    }
+    result.apiUrl = apiUrl;
+
     result.status = 'PASS';
     result.finalUrl = clickResult.finalUrl;
     result.title = clickResult.title;
@@ -460,11 +534,11 @@ async function validateMainButton(page, url) {
       result.backError = clickResult.backError || 'Back navigation failed';
       result.status = 'FAIL';
     }
-    console.log(`  ✅ bold-penguin test PASSED (back: ${result.backNavigation})`);
+    console.log(`  ✅ CTA test PASSED for "${result.buttonName}" (back: ${result.backNavigation})`);
   } catch (error) {
     result.status = 'FAIL';
     result.error = error.message || 'Unknown error';
-    console.log(`  ❌ bold-penguin test FAILED: ${result.error}`);
+    console.log(`  ❌ CTA test FAILED for "${result.buttonName}": ${result.error}`);
   }
   return result;
 }
@@ -839,6 +913,7 @@ async function validateUrl(page, url, index) {
     error: '',
     pageError: '',
     screenshot: '',
+    boldPenguinDom: 'No',
     mainStatus: '',
     mainError: '',
     mainFinalUrl: '',
@@ -846,6 +921,8 @@ async function validateUrl(page, url, index) {
     mainBackNav: '',
     mainBackError: '',
     mainBackUrl: '',
+    mainApiUrl: '',
+    mainButtonName: '',
     ctaStatus: '',
     ctaError: '',
     ctaButtonsFound: '',
@@ -886,6 +963,9 @@ async function validateUrl(page, url, index) {
       return result;
     }
 
+    result.boldPenguinDom = (await detectBoldPenguinDomPresence(page)) ? 'Yes' : 'No';
+    console.log(`  🔎 DOM bold-penguin-quote element present: ${result.boldPenguinDom}`);
+
     // Main Button
     const mainRes = await validateMainButton(page, url);
     Object.assign(result, {
@@ -896,6 +976,8 @@ async function validateUrl(page, url, index) {
       mainBackNav: mainRes.backNavigation,
       mainBackError: mainRes.backError,
       mainBackUrl: mainRes.backUrl,
+      mainApiUrl: mainRes.apiUrl || '',
+      mainButtonName: mainRes.buttonName || '',
     });
 
     if (page.url() !== url) {
@@ -1048,6 +1130,12 @@ function generateHtmlReport(results, startTime, mobileMode) {
 
   const timestamp = new Date(startTime).toLocaleString();
   const modeLabel = mobileMode ? '📱 Mobile' : '🖥️ Desktop';
+  const escapeHtml = (value = '') => String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 
   let rows = results.map((r, i) => {
     const overallClass = r.status === 'PASS' ? 'badge-pass' : (r.status === 'N/A' ? 'badge-na' : 'badge-fail');
@@ -1055,25 +1143,31 @@ function generateHtmlReport(results, startTime, mobileMode) {
     const smallClass = r.smallCtaStatus === 'PASS' ? 'badge-pass' : (r.smallCtaStatus === 'N/A' ? 'badge-na' : 'badge-fail');
     const stickyClass = r.stickyCtaStatus === 'PASS' ? 'badge-pass' : (r.stickyCtaStatus === 'N/A' ? 'badge-na' : 'badge-fail');
     const backClass = r.mainBackNav === 'SUCCESS' ? 'badge-pass' : (r.mainBackNav === 'N/A' ? 'badge-na' : 'badge-fail');
+    const detectedButtonName = escapeHtml(r.mainButtonName || 'Main CTA');
+    const boldPenguinDomValue = escapeHtml(r.boldPenguinDom || 'No');
 
-    const smallUrlsHtml = r.smallCtaUrls ? r.smallCtaUrls.split(' | ').map(u => `<div><a href="${u}" target="_blank">${u}</a></div>`).join('') : '—';
-    const stickyUrlsHtml = r.stickyCtaUrls ? r.stickyCtaUrls.split(' | ').map(u => `<div><a href="${u}" target="_blank">${u}</a></div>`).join('') : '—';
-    const boldPenguinResult = r.mainFinalUrl ? `<a href="${r.mainFinalUrl || '#'}" target="_blank">${r.mainFinalUrl || '—'}</a>` : '—';
+    const smallUrlsHtml = r.smallCtaUrls ? r.smallCtaUrls.split(' | ').map(u => `<div><a href="${u}" target="_blank">${escapeHtml(u)}</a></div>`).join('') : '—';
+    const stickyUrlsHtml = r.stickyCtaUrls ? r.stickyCtaUrls.split(' | ').map(u => `<div><a href="${u}" target="_blank">${escapeHtml(u)}</a></div>`).join('') : '—';
+    const boldPenguinResult = r.mainFinalUrl ? `<a href="${r.mainFinalUrl || '#'}" target="_blank">${escapeHtml(r.mainFinalUrl || '—')}</a>` : '—';
+    const boldPenguinApi = r.mainApiUrl ? `<a href="${r.mainApiUrl}" target="_blank">${escapeHtml(r.mainApiUrl)}</a>` : '—';
     const errorDetails = r.error ? r.error : (r.pageError ? r.pageError : '—');
 
     return `
       <tr>
         <td>${i + 1}</td>
-        <td><a href="${r.url}" target="_blank">${r.url}</a></td>
+        <td><a href="${r.url}" target="_blank">${escapeHtml(r.url)}</a></td>
+        <td>${boldPenguinDomValue}</td>
         <td><span class="badge ${overallClass}">${r.status}</span></td>
         <td><span class="badge ${mainClass}">${r.mainStatus || 'N/A'}</span></td>
+        <td>${detectedButtonName}</td>
+        <td>${boldPenguinApi}</td>
         <td>${boldPenguinResult}</td>
         <td><span class="badge ${backClass}">${r.mainBackNav || 'N/A'}</span></td>
         <td><span class="badge ${smallClass}">${r.smallCtaStatus || 'N/A'}</span></td>
         <td>${smallUrlsHtml}</td>
         <td><span class="badge ${stickyClass}">${r.stickyCtaStatus || 'N/A'}</span></td>
         <td>${stickyUrlsHtml}</td>
-        <td style="font-size:12px; max-width:300px; word-wrap:break-word;">${errorDetails}</td>
+        <td style="font-size:12px; max-width:300px; word-wrap:break-word;">${escapeHtml(errorDetails)}</td>
       </tr>
     `;
   }).join('');
@@ -1120,7 +1214,7 @@ function generateHtmlReport(results, startTime, mobileMode) {
     <div class="summary-item">✅ Overall Pass: <span class="pass">${passed}</span></div>
     <div class="summary-item">❌ Overall Fail: <span class="fail">${failed}</span></div>
     <div class="summary-item">⏸️ Overall N/A: <span class="na">${na}</span></div>
-    <div class="summary-item">🔵 bold-penguin Pass: <span class="pass">${mainPass}</span> | Fail: <span class="fail">${mainFail}</span> | N/A: <span class="na">${mainNA}</span></div>
+    <div class="summary-item">🔵 Main CTA Pass: <span class="pass">${mainPass}</span> | Fail: <span class="fail">${mainFail}</span> | N/A: <span class="na">${mainNA}</span></div>
     <div class="summary-item">⬅️ Back Navigation Pass: <span class="pass">${backPass}</span> | Fail: <span class="fail">${backFail}</span> | N/A: <span class="na">${backNA}</span></div>
     <div class="summary-item">🟢 SmallCTA Pass: <span class="pass">${smallPass}</span> | Fail: <span class="fail">${smallFail}</span> | N/A: <span class="na">${smallNA}</span></div>
     <div class="summary-item">🟡 StickyCTA Pass: <span class="pass">${stickyPass}</span> | Fail: <span class="fail">${stickyFail}</span> | N/A: <span class="na">${stickyNA}</span></div>
@@ -1131,9 +1225,12 @@ function generateHtmlReport(results, startTime, mobileMode) {
       <tr>
         <th>#</th>
         <th>URL</th>
-        <th>Overall</th>
         <th>bold-penguin</th>
-        <th>bold-penguin Final URL</th>
+        <th>Overall</th>
+        <th>Main CTA</th>
+        <th>Detected Button Name</th>
+        <th>CTA API URL</th>
+        <th>CTA Final URL</th>
         <th>Back Nav</th>
         <th>SmallCTA Status</th>
         <th>SmallCTA URLs</th>
@@ -1156,7 +1253,9 @@ function generateExcelReport(results, outputPath) {
   try {
     const data = results.map(r => ({
       'URL': r.url || '',
+      'bold-penguin': r.boldPenguinDom || 'No',
       'bold_penguin_status': r.mainStatus || '',
+      'bold_penguin_api_url': r.mainApiUrl || '',
       'bold_penguin_final_url': r.mainFinalUrl || '',
       'back_navigation': r.mainBackNav || '',
       'back_error': r.mainBackError || '',
@@ -1237,7 +1336,9 @@ function generateExcelReport(results, outputPath) {
     results.push(result);
     console.log(`\n📊 Summary for ${url}:`);
     console.log(`  Overall: ${result.status}`);
-    console.log(`  bold-penguin: ${result.mainStatus || 'N/A'}`);
+    console.log(`  Main CTA: ${result.mainStatus || 'N/A'}`);
+    console.log(`  Detected button name: ${result.mainButtonName || 'Main CTA'}`);
+    console.log(`  CTA API URL: ${result.mainApiUrl || 'N/A'}`);
     console.log(`  Back Nav: ${result.mainBackNav || 'N/A'}`);
     console.log(`  SmallCTA: ${result.smallCtaStatus || 'N/A'}`);
     console.log(`  StickyCTA: ${result.stickyCtaStatus || 'N/A'}`);
@@ -1249,7 +1350,7 @@ function generateExcelReport(results, outputPath) {
   await browser.close();
 
   if (GENERATE_REPORTS) {
-    const headers = ['url', 'bold_penguin_status', 'bold_penguin_final_url', 'back_navigation', 'back_error', 'small_cta_urls', 'SmallCTA', 'sticky_cta_urls', 'StickyCTA', 'pageError', 'status', 'error_details'];
+    const headers = ['url', 'bold-penguin', 'detected_button_name', 'bold_penguin_status', 'bold_penguin_api_url', 'bold_penguin_final_url', 'back_navigation', 'back_error', 'small_cta_urls', 'SmallCTA', 'sticky_cta_urls', 'StickyCTA', 'pageError', 'status', 'error_details'];
     const escapeCsvValue = (value) => {
       const text = value == null ? '' : String(value);
       return text.includes(',') || text.includes('"') || text.includes('\n') || text.includes('\r')
@@ -1259,7 +1360,10 @@ function generateExcelReport(results, outputPath) {
 
     const rows = results.map(r => headers.map(h => {
       if (h === 'url') return escapeCsvValue(r.url || '');
+      if (h === 'bold-penguin') return escapeCsvValue(r.boldPenguinDom || 'No');
+      if (h === 'detected_button_name') return escapeCsvValue(r.mainButtonName || 'Main CTA');
       if (h === 'bold_penguin_status') return escapeCsvValue(r.mainStatus || '');
+      if (h === 'bold_penguin_api_url') return escapeCsvValue(r.mainApiUrl || '');
       if (h === 'bold_penguin_final_url') return escapeCsvValue(r.mainFinalUrl || '');
       if (h === 'back_navigation') return escapeCsvValue(r.mainBackNav || '');
       if (h === 'back_error') return escapeCsvValue(r.mainBackError || '');
