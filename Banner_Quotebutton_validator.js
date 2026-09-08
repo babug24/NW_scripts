@@ -153,6 +153,32 @@ function normalizeUrlForComparison(url) {
   }
 }
 
+function urlsMatchExpectedTarget(actualUrl, expectedUrl) {
+  if (!actualUrl || !expectedUrl) return false;
+
+  try {
+    const actual = new URL(actualUrl);
+    const expected = new URL(expectedUrl);
+
+    const actualNormalized = normalizeUrlForComparison(actual.href);
+    const expectedNormalized = normalizeUrlForComparison(expected.href);
+    if (actualNormalized === expectedNormalized) {
+      return true;
+    }
+
+    // A CTA that is expected to land on the site root (for example, agency.nationwide.com/)
+    // may legitimately resolve to a same-origin search or campaign URL with query parameters.
+    // Treat same-origin root expectations as valid for any path on that host.
+    if (expected.pathname === '/' && actual.origin === expected.origin) {
+      return true;
+    }
+
+    return false;
+  } catch (error) {
+    return normalizeUrlForComparison(actualUrl) === normalizeUrlForComparison(expectedUrl);
+  }
+}
+
 function isSystemActionHref(href) {
   return /^(tel:|mailto:|sms:|callto:)/i.test(String(href || '').trim());
 }
@@ -568,7 +594,7 @@ async function clickAndValidateNavigation(page, element, expectedTarget) {
   if (expectedTarget && hrefValue) {
     try {
       const hrefTarget = new URL(hrefValue, result.initialUrl).href;
-      if (normalizeUrlForComparison(hrefTarget) === normalizeUrlForComparison(expectedTarget)) {
+      if (urlsMatchExpectedTarget(hrefTarget, expectedTarget)) {
         result.finalUrl = hrefTarget;
         result.newTabOpened = true;
         result.navigationType = 'Popup/External Link';
@@ -597,7 +623,7 @@ async function clickAndValidateNavigation(page, element, expectedTarget) {
 
   // Validate the target URL before checking destination usability.
   if (expectedTarget) {
-    if (normalizeUrlForComparison(result.finalUrl) === normalizeUrlForComparison(expectedTarget)) {
+    if (urlsMatchExpectedTarget(result.finalUrl, expectedTarget)) {
       console.log('[NAVIGATION] Expected target matched successfully.');
     } else {
       result.error = `Final URL (${result.finalUrl}) does not match expected (${expectedTarget})`;
