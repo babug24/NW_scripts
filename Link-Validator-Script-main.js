@@ -10,6 +10,7 @@ let MOBILE_MODE = false;   // --mobile  : force mobile-only run
 let UNIFIED_MODE = false;  // --unified : desktop + mobile merged in one run
 let PRIVATE_MODE = true;   // --private : accepted for compatibility (Playwright context is private by default)
 let REPORT_ALL_MODE = true; // default: include all discovered links/items in reports (no exclusion filters)
+const VERBOSE_RETRY_LOGS = false; // suppress noisy rate-limit retry chatter in the console
 
 function printUsage() {
   console.log('Usage: node Link-Validator-Script-main.js [options]');
@@ -93,7 +94,7 @@ function parseCliArgs(argv) {
       continue;
     }
 
-    if (arg === '--url') {
+    if (arg === '--url' || arg === '-url') {
       const nextValue = argv[i + 1];
       if (!nextValue || nextValue.startsWith('--')) {
         console.error('❌ Missing value for --url');
@@ -1473,7 +1474,7 @@ function generateSummaryDashboard(urlSummaries, timestamp) {
 </head>
 <body>
   <div class="container">
-    <h1>� Link Validation Summary Dashboard</h1>
+    <h1>🔗 Link Validation Summary Dashboard</h1>
     <p class="info">📅 Generated: ${new Date().toLocaleString()} | Environment: <strong>${environmentName}</strong></p>
  
     <div class="summary">
@@ -1611,13 +1612,17 @@ function generateCombinedReport(allResults, timestamp) {
     : `${safeEnvironmentName}_link_validation`;
   const reportFile = path.join(REPORT_DIR, `${aggregatePrefix}_${timestamp}.html`);
 
-  // Group results by URL
+  // Group results by URL.
+  // Rows without a URL (e.g. script-level fatal errors logged with url='')
+  // are bucketed under a labelled key so they remain visible in the report
+  // without creating an empty/undefined key in the output.
   const groupedByUrl = {};
   allResults.forEach(r => {
-    if (!groupedByUrl[r.url]) {
-      groupedByUrl[r.url] = [];
+    const urlKey = (r.url && String(r.url).trim()) ? r.url : '(no URL)';
+    if (!groupedByUrl[urlKey]) {
+      groupedByUrl[urlKey] = [];
     }
-    groupedByUrl[r.url].push(r);
+    groupedByUrl[urlKey].push(r);
   });
 
   // Calculate overall statistics
@@ -2091,7 +2096,10 @@ async function runErrorValidationOnFailSheet(xlsxFilePath) {
     failSheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
       if (rowNumber === 1) return; // Skip header
       const pageErrorValue = cellText(row.getCell(pageErrorsCol));
-      if (pageErrorValue === 'No page errors detected') {
+      const elementType = cellText(row.getCell(3));
+      const isInteractionValidationFailure = elementType === 'Consent popup link' ||
+        elementType === 'Quote validation message';
+      if (pageErrorValue === 'No page errors detected' && !isInteractionValidationFailure) {
         rowsToDelete.push(rowNumber);
       }
     });
@@ -2625,8 +2633,18 @@ async function extractLinks(page, baseUrl, modeOverride = null) {
       return parts.join(' > ') || 'N/A';
     }
 
+    function getPreferredPromoTitleElement(root) {
+      const nodeCandidates = [root, root?.closest('.bolt-header-panel-promo'), root?.closest('.bolt-header-promo'), root?.closest('[class*="promo"]')];
+      for (const node of nodeCandidates) {
+        if (!node) continue;
+        const titleEl = node.querySelector?.('.bolt-header-promo-title');
+        if (titleEl?.textContent?.trim()) return titleEl;
+      }
+      return null;
+    }
+
     function getSourceElement(link, text) {
-      const headerPromoTitle = link.querySelector('.bolt-header-promo-title');
+      const headerPromoTitle = getPreferredPromoTitleElement(link);
       if (headerPromoTitle?.textContent?.trim()) {
         return 'span.bolt-header-promo-title';
       }
@@ -2647,10 +2665,19 @@ async function extractLinks(page, baseUrl, modeOverride = null) {
     }
 
     function getPreferredLinkText(link) {
-      const headerPromoTitle = link.querySelector('.bolt-header-promo-title');
+      const headerPromoTitle = getPreferredPromoTitleElement(link);
       const preferred = headerPromoTitle?.textContent?.trim();
       if (preferred) return preferred;
+
+      const promoText = link.querySelector('.bolt-header-promo-text')?.textContent?.trim();
+      if (promoText && !includesHeaderPromoTitle(link)) return promoText;
+
       return link.textContent?.trim() || link.getAttribute('aria-label') || link.getAttribute('title') || '';
+    }
+
+    function includesHeaderPromoTitle(link) {
+      const promoNode = link.closest('.bolt-header-panel-promo, .bolt-header-promo, [class*="promo"]');
+      return !!promoNode?.querySelector('.bolt-header-promo-title');
     }
 
     function getClickValidationData(link, text) {
@@ -2668,16 +2695,23 @@ async function extractLinks(page, baseUrl, modeOverride = null) {
       const isPlaceholderHref = normalizedRawHref === '#' || normalizedRawHref === '/test' || normalizedRawHref === 'test';
       const sourceComponent = getSourceComponentPath(link).toLowerCase();
       const isVisualPromoThreeLink = sourceComponent.includes('ngx-web-visual-content-promo-three');
+      const isConsentPopupLink = /do not sell or share my personal information/i.test(text);
+      const isZipValidationQuote = /start your quote/i.test(text) &&
+        (sourceComponent.includes('ngx-nationwide-custom-target-banner') ||
+          /detail-banner__quote-btn/i.test(attrSignal));
       const shouldClickValidate = isPlaceholderHref && !isVisualPromoThreeLink && (ctaTextRegex.test(text) || ctaAttrRegex.test(attrSignal));
-      if (!shouldClickValidate) {
-        return { shouldClickValidate: false, clickSelector: '' };
+      if (!shouldClickValidate && !isConsentPopupLink && !isZipValidationQuote) {
+        return { shouldClickValidate: false, clickSelector: '', clickValidationType: '' };
       }
 
       const validatorId = `href-placeholder-${Math.random().toString(36).slice(2)}`;
       link.setAttribute('data-link-validator-click-id', validatorId);
       return {
         shouldClickValidate: true,
-        clickSelector: `[data-link-validator-click-id="${validatorId}"]`
+        clickSelector: `[data-link-validator-click-id="${validatorId}"]`,
+        clickValidationType: isConsentPopupLink
+          ? 'consent-popup'
+          : (isZipValidationQuote ? 'quote-validation-message' : 'quote-navigation')
       };
     }
 
@@ -2867,7 +2901,8 @@ async function extractLinks(page, baseUrl, modeOverride = null) {
           sourceComponent: getSourceComponentPath(link),
           sourceElement: getSourceElement(link, text),
           shouldClickValidate: clickValidationData.shouldClickValidate,
-          clickSelector: clickValidationData.clickSelector
+          clickSelector: clickValidationData.clickSelector,
+          clickValidationType: clickValidationData.clickValidationType
         });
       }
     }
@@ -2904,7 +2939,8 @@ async function extractLinks(page, baseUrl, modeOverride = null) {
         sourceComponent: getSourceComponentPath(link),
         sourceElement: getSourceElement(link, text),
         shouldClickValidate: clickValidationData.shouldClickValidate,
-        clickSelector: clickValidationData.clickSelector
+        clickSelector: clickValidationData.clickSelector,
+        clickValidationType: clickValidationData.clickValidationType
       });
       seenKeys.add(fallbackKey);
     }
@@ -3327,6 +3363,11 @@ async function extractNonHrefLinks(page, baseUrl) {
       const text = btn.textContent?.trim() || btn.getAttribute('aria-label') || btn.title || 'Unnamed button';
       if (seenLinkTexts.has(text)) continue;
       seenLinkTexts.add(text);
+      const isConsentPopupLink = /do not sell or share my personal information/i.test(text);
+      const consentValidatorId = isConsentPopupLink
+        ? `consent-popup-button-${results.length}-${Math.random().toString(36).slice(2)}`
+        : '';
+      if (consentValidatorId) btn.setAttribute('data-link-validator-click-id', consentValidatorId);
 
       // Try to extract navigation info from onclick handler or data attributes
       const onclickAttr = btn.getAttribute('onclick') || '';
@@ -3351,7 +3392,10 @@ async function extractNonHrefLinks(page, baseUrl) {
         clickableType: 'button',
         sourceComponent: getSourceComponentPath(btn),
         sourceElement: getElementSignature(btn),
-        navigationSource: detectedUrl ? 'attribute' : 'handler'
+        navigationSource: detectedUrl ? 'attribute' : 'handler',
+        shouldClickValidate: isConsentPopupLink,
+        clickValidationType: isConsentPopupLink ? 'consent-popup' : '',
+        clickSelector: consentValidatorId ? `[data-link-validator-click-id="${consentValidatorId}"]` : ''
       });
     }
 
@@ -3363,6 +3407,11 @@ async function extractNonHrefLinks(page, baseUrl) {
       const text = elem.textContent?.trim() || elem.getAttribute('aria-label') || elem.title || 'Unnamed button';
       if (seenLinkTexts.has(text)) continue;
       seenLinkTexts.add(text);
+      const isConsentPopupLink = /do not sell or share my personal information/i.test(text);
+      const consentValidatorId = isConsentPopupLink
+        ? `consent-popup-role-${results.length}-${Math.random().toString(36).slice(2)}`
+        : '';
+      if (consentValidatorId) elem.setAttribute('data-link-validator-click-id', consentValidatorId);
 
       const onclickAttr = elem.getAttribute('onclick') || '';
       const dataUrl = elem.getAttribute('data-url') || '';
@@ -3386,7 +3435,10 @@ async function extractNonHrefLinks(page, baseUrl) {
         clickableType: 'role-button',
         sourceComponent: getSourceComponentPath(elem),
         sourceElement: getElementSignature(elem),
-        navigationSource: detectedUrl ? 'attribute' : 'handler'
+        navigationSource: detectedUrl ? 'attribute' : 'handler',
+        shouldClickValidate: isConsentPopupLink,
+        clickValidationType: isConsentPopupLink ? 'consent-popup' : '',
+        clickSelector: consentValidatorId ? `[data-link-validator-click-id="${consentValidatorId}"]` : ''
       });
     }
 
@@ -3410,9 +3462,13 @@ async function extractNonHrefLinks(page, baseUrl) {
         boltButton.getAttribute('data-analytics-click') || '',
         boltButton.outerHTML.substring(0, 300)
       ].join(' ');
+      const sourceComponent = getSourceComponentPath(boltButton).toLowerCase();
+      const isZipValidationQuote = /start your quote/i.test(text) &&
+        (sourceComponent.includes('ngx-nationwide-custom-target-banner') ||
+          /detail-banner__quote-btn/i.test(attrSignal));
       const dataUrl = boltButton.getAttribute('data-url') || boltButton.getAttribute('data-href') || '';
       const routerLink = boltButton.getAttribute('[routerLink]') || boltButton.getAttribute('routerLink') || '';
-      const shouldClickValidate = ctaTextRegex.test(text) || ctaAttrRegex.test(attrSignal);
+      const shouldClickValidate = isZipValidationQuote || ctaTextRegex.test(text) || ctaAttrRegex.test(attrSignal);
       const validatorId = `bolt-button-${results.length}-${Math.random().toString(36).slice(2)}`;
       boltButton.setAttribute('data-link-validator-click-id', validatorId);
 
@@ -3428,7 +3484,8 @@ async function extractNonHrefLinks(page, baseUrl) {
         sourceElement: getElementSignature(boltButton),
         navigationSource: dataUrl || routerLink ? 'attribute' : (shouldClickValidate ? 'click' : ''),
         shouldClickValidate,
-        clickSelector: `[data-link-validator-click-id="${validatorId}"]`
+        clickSelector: `[data-link-validator-click-id="${validatorId}"]`,
+        clickValidationType: isZipValidationQuote ? 'quote-validation-message' : 'quote-navigation'
       });
     }
 
@@ -3913,7 +3970,9 @@ async function validateLink(requestContext, absoluteUrl, retries = MAX_RETRIES, 
 
       if (statusCode === 429) {
         if (attempt < retries) {
-          console.log(`   ⏳ Rate limited (HTTP 429) for ${absoluteUrl}; retrying ${attempt}/${retries}`);
+          if (VERBOSE_RETRY_LOGS) {
+            console.log(`   ⏳ Rate limited (HTTP 429) for ${absoluteUrl}; retrying ${attempt}/${retries}`);
+          }
           await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
           continue;
         }
@@ -3950,7 +4009,9 @@ async function validateLink(requestContext, absoluteUrl, retries = MAX_RETRIES, 
           if (htmlErrorPattern) {
             if (isRateLimitErrorMessage(htmlErrorPattern)) {
               if (attempt < retries) {
-                console.log(`   ⏳ Rate-limit page detected for ${absoluteUrl}; retrying ${attempt}/${retries}`);
+                if (VERBOSE_RETRY_LOGS) {
+                  console.log(`   ⏳ Rate-limit page detected for ${absoluteUrl}; retrying ${attempt}/${retries}`);
+                }
                 await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
                 continue;
               }
@@ -4013,7 +4074,9 @@ async function validateLink(requestContext, absoluteUrl, retries = MAX_RETRIES, 
         }
         return { statusCode: null, error: error.message, redirected: 'N/A', contentIssue: false };
       }
-      console.log(`   Retry ${attempt} for ${absoluteUrl}`);
+      if (VERBOSE_RETRY_LOGS) {
+        console.log(`   Retry ${attempt} for ${absoluteUrl}`);
+      }
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
   }
@@ -4037,6 +4100,150 @@ function isExpectedQuoteDestination(url) {
   return /(quote|estimate|getaquote|bold[-_]?penguin|api|semsee|business_insurance)/i.test(url);
 }
 
+async function validateConsentPopup(page, selector, linkText = '') {
+  const originalUrl = page.url();
+  let popupPage = null;
+
+  try {
+    let locator = null;
+
+    // Resolve the control from the rendered page so consent validation follows
+    // the same UI path as a user click, even if Angular re-rendered the anchor
+    // after link extraction attached its temporary selector.
+    if (linkText) {
+      const consentCandidates = page.locator('a, button, [role="button"]')
+        .filter({ hasText: linkText });
+      const candidateCount = await consentCandidates.count().catch(() => 0);
+      for (let index = candidateCount - 1; index >= 0; index--) {
+        const candidate = consentCandidates.nth(index);
+        if (await candidate.isVisible().catch(() => false)) {
+          locator = candidate;
+          break;
+        }
+      }
+    }
+
+    if (!locator) locator = page.locator(selector).first();
+    if (await locator.count().catch(() => 0) === 0 && linkText) {
+      const fallbackSelector = await page.evaluate((text) => {
+        const normalizedText = text.trim().replace(/\s+/g, ' ').toLowerCase();
+        const candidates = Array.from(document.querySelectorAll('a, button, [role="button"]'));
+        const matchingCandidates = candidates.filter(element => {
+          const elementText = (
+            element.textContent ||
+            element.getAttribute('aria-label') ||
+            element.getAttribute('title') ||
+            ''
+          ).trim().replace(/\s+/g, ' ').toLowerCase();
+          const style = window.getComputedStyle(element);
+          const rect = element.getBoundingClientRect();
+          const isVisible = style.display !== 'none' &&
+            style.visibility !== 'hidden' &&
+            rect.width > 0 &&
+            rect.height > 0;
+          if (!elementText || !isVisible) return false;
+          return elementText === normalizedText ||
+            elementText.includes(normalizedText) ||
+            normalizedText.includes(elementText);
+        });
+        const match = matchingCandidates.sort((left, right) =>
+          left.textContent.length - right.textContent.length
+        )[0];
+        if (!match) return '';
+
+        const validatorId = `consent-popup-fallback-${Math.random().toString(36).slice(2)}`;
+        match.setAttribute('data-link-validator-consent-id', validatorId);
+        return `[data-link-validator-consent-id="${validatorId}"]`;
+      }, linkText);
+      if (fallbackSelector) locator = page.locator(fallbackSelector).first();
+    }
+
+    if (await locator.count().catch(() => 0) === 0) {
+      return { passed: false, error: 'Consent link target not found after link extraction' };
+    }
+
+    await locator.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+    const popupPromise = page.waitForEvent('popup', { timeout: 5000 }).catch(() => null);
+    await locator.click({ timeout: 10000 });
+    popupPage = await popupPromise;
+
+    if (popupPage) {
+      await popupPage.waitForLoadState('domcontentloaded', { timeout: REQUEST_TIMEOUT }).catch(() => {});
+    }
+
+    const hasConsentDialog = async () => {
+      const targetPages = page.context().pages();
+      if (!targetPages.includes(page)) targetPages.push(page);
+      if (popupPage && !targetPages.includes(popupPage)) targetPages.push(popupPage);
+
+      for (const targetPage of targetPages) {
+        if (targetPage.isClosed()) continue;
+        for (const frame of targetPage.frames()) {
+          const found = await frame.evaluate(() => {
+            const inspectRoot = (root) => {
+              const text = (root.textContent || '').replace(/\s+/g, ' ');
+              const hasExpectedHeadings = /About Cookies on This Site/i.test(text) &&
+                /Notice of Right to Opt-Out of Sale\/Sharing/i.test(text);
+              if (root.querySelector('#advancePanelHeader, .consentHeader') || hasExpectedHeadings) {
+                return true;
+              }
+
+              for (const element of root.querySelectorAll('*')) {
+                if (element.shadowRoot && inspectRoot(element.shadowRoot)) return true;
+              }
+              return false;
+            };
+
+            return inspectRoot(document);
+          }).catch(() => false);
+          if (found) return true;
+        }
+      }
+      return false;
+    };
+
+    let consentDialogFound = false;
+    const detectionDeadline = Date.now() + 10000;
+    while (!consentDialogFound && Date.now() < detectionDeadline) {
+      consentDialogFound = await hasConsentDialog();
+      if (!consentDialogFound) await page.waitForTimeout(250);
+    }
+
+    return consentDialogFound
+      ? { passed: true, error: '', finalUrl: popupPage?.url() || page.url() }
+      : { passed: false, error: 'Consent popup did not display the expected TrustArc panel', finalUrl: popupPage?.url() || page.url() };
+  } catch (error) {
+    return { passed: false, error: error.message };
+  } finally {
+    if (popupPage) await popupPage.close().catch(() => {});
+    await dismissConsentOverlays(page);
+    if (page.url() !== originalUrl) {
+      await page.goto(originalUrl, { waitUntil: 'domcontentloaded', timeout: REQUEST_TIMEOUT }).catch(() => {});
+      await waitForPageLoad(page).catch(() => {});
+    }
+  }
+}
+
+async function dismissConsentOverlays(page) {
+  await page.keyboard.press('Escape').catch(() => {});
+  await page.waitForTimeout(300);
+
+  const closeSelectors = [
+    '.truste-close-button',
+    '#trustarc-internal-close-button',
+    '#onetrust-close-btn-container button',
+    '#onetrust-pc-sdk button[aria-label*="Close" i]',
+    '#onetrust-pc-sdk .ot-close-icon'
+  ];
+  for (const selector of closeSelectors) {
+    const closeButton = page.locator(selector).last();
+    if (await closeButton.isVisible().catch(() => false)) {
+      await closeButton.click({ force: true, timeout: 3000 }).catch(() => {});
+      await page.waitForTimeout(300);
+    }
+  }
+}
+
 async function validateMissingHrefClickNavigation(page, requestContext, selector, baseUrl, linkText = '', rawHref = '') {
   const originalUrl = page.url();
   let popupPage = null;
@@ -4045,6 +4252,7 @@ async function validateMissingHrefClickNavigation(page, requestContext, selector
   let redirected = 'No';
 
   try {
+    await dismissConsentOverlays(page);
     let locator = page.locator(selector).first();
     let count = await locator.count().catch(() => 0);
     if (count === 0 && linkText) {
@@ -4105,7 +4313,11 @@ async function validateMissingHrefClickNavigation(page, requestContext, selector
 
     const popupPromise = page.waitForEvent('popup', { timeout: 5000 }).catch(() => null);
     const navigationPromise = page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => null);
-    await locator.click({ timeout: 10000 });
+    if (/start your quote/i.test(linkText)) {
+      await locator.evaluate(element => element.click());
+    } else {
+      await locator.click({ timeout: 10000 });
+    }
 
     const popup = await popupPromise;
     const navigationResponse = await navigationPromise;
@@ -4121,6 +4333,25 @@ async function validateMissingHrefClickNavigation(page, requestContext, selector
       }
       await page.waitForTimeout(1500);
       finalUrl = page.url();
+    }
+
+    // The custom target banner validates an empty ZIP field inline instead of
+    // navigating. Treat the exact visible field error as a successful click.
+    const zipValidationMessage = page.locator('span.alert.alert-danger.nw-field-error1')
+      .filter({ hasText: /Enter your 5 or 9 digit ZIP Code/i });
+    const zipValidationDeadline = Date.now() + 3000;
+    while (Date.now() < zipValidationDeadline && !(await zipValidationMessage.isVisible().catch(() => false))) {
+      await page.waitForTimeout(250);
+    }
+    if (await zipValidationMessage.isVisible().catch(() => false)) {
+      return {
+        passed: true,
+        error: '',
+        finalUrl: page.url(),
+        statusCode,
+        redirected,
+        validationMessage: 'Enter your 5 or 9 digit ZIP Code'
+      };
     }
 
     if (!finalUrl || finalUrl === originalUrl) {
@@ -4195,6 +4426,16 @@ async function validateMissingHrefClickNavigation(page, requestContext, selector
           let requestContext = null;
 
           urlIndex++;
+
+          // Reset per-URL source metadata so the page-navigation row (and any
+          // early error rows for this URL) do not inherit the source fields
+          // from the last link processed on the previous URL.
+          _pendingViewportSource  = 'N/A';
+          _pendingSourceHref      = 'N/A';
+          _pendingSourceUrl       = 'N/A';
+          _pendingSourceComponent = 'N/A';
+          _pendingSourceElement   = 'N/A';
+
           console.log(`\n🔍 [${urlIndex}/${urls.length}] Testing URL: ${baseUrl}`);
           console.log('─'.repeat(60));
 
@@ -4578,7 +4819,16 @@ async function validateMissingHrefClickNavigation(page, requestContext, selector
         // ── End span-as-broken-link detection ───────────────────────────────
 
         // Combine both href and non-href links for validation
-        const allLinks = [...links, ...nonHrefLinks];
+          const allLinks = [];
+          const seenConsentValidation = new Set();
+          for (const link of [...links, ...nonHrefLinks]) {
+            if (link.clickValidationType === 'consent-popup') {
+              const consentKey = (link.text || '').trim().toLowerCase();
+              if (seenConsentValidation.has(consentKey)) continue;
+              seenConsentValidation.add(consentKey);
+            }
+            allLinks.push(link);
+          }
         console.log(`   📌 Coverage audit: href-links=${links.length}, non-href-clickables=${nonHrefLinks.length}, combined=${allLinks.length}`);
         
         if (allLinks.length === 0) {
@@ -4606,12 +4856,66 @@ async function validateMissingHrefClickNavigation(page, requestContext, selector
           const link = allLinks[i];
           // Tag every logResult call in this iteration with the link's viewport source
           _pendingViewportSource = link.viewportSource || 'N/A';
-          const { href, rawHref, text, target, clickableType, navigationSource } = link;
+          const { href, rawHref, text, target, clickableType, navigationSource, clickValidationType } = link;
           _pendingSourceHref = rawHref || href || 'N/A';
           _pendingSourceUrl = resolveSourceUrl(_pendingSourceHref, baseUrl);
           _pendingSourceComponent = link.sourceComponent || 'N/A';
           _pendingSourceElement = link.sourceElement || 'N/A';
           const stepDesc = `${text.substring(0, 50)}${text.length > 50 ? '...' : ''}`;
+
+          if (clickValidationType === 'consent-popup' && link.clickSelector) {
+            const consentValidation = await validateConsentPopup(page, link.clickSelector, text);
+            logResult(
+              stepDesc,
+              'Consent popup displays the expected TrustArc panel',
+              consentValidation.passed ? 'TrustArc consent popup displayed' : 'Consent popup not detected',
+              consentValidation.passed ? 'PASS' : 'FAIL',
+              consentValidation.error || '',
+              0,
+              baseUrl,
+              consentValidation.finalUrl || href,
+              'N/A',
+              'N/A',
+              'No',
+              text,
+              target || 'Same Window',
+              'No',
+              'Consent popup link'
+            );
+            console.log(consentValidation.passed
+              ? `   ✅ Consent popup validated: "${text.substring(0, 60)}"`
+              : `   ❌ Consent popup validation failed: "${text.substring(0, 60)}" — ${consentValidation.error}`);
+            continue;
+          }
+
+          if (clickValidationType === 'quote-validation-message' && link.clickSelector) {
+            const clickValidation = await validateMissingHrefClickNavigation(page, requestContext, link.clickSelector, baseUrl, text, rawHref || '');
+            logResult(
+              stepDesc,
+              'ZIP validation message displayed when Start Your Quote is clicked without a ZIP code',
+              clickValidation.validationMessage || (clickValidation.finalUrl === baseUrl ? 'ZIP validation message not detected' : `Navigated to ${clickValidation.finalUrl}`),
+              clickValidation.passed ? 'PASS' : 'FAIL',
+              clickValidation.error || '',
+              0,
+              baseUrl,
+              clickValidation.finalUrl || href,
+              'N/A',
+              clickValidation.statusCode ? clickValidation.statusCode.toString() : 'N/A',
+              clickValidation.redirected || 'No',
+              text,
+              target || 'Same Window',
+              'No',
+              'Quote validation message',
+              link.angularClassification || 'standard',
+              link.hasNgxWrapper || false,
+              link.hasSpecialAttrs || false,
+              link.isRichText || false
+            );
+            console.log(clickValidation.passed
+              ? `   ✅ ZIP validation message detected for: "${text.substring(0, 60)}"`
+              : `   ❌ ZIP validation message validation failed: "${text.substring(0, 60)}" — ${clickValidation.error}`);
+            continue;
+          }
 
           // ========== SPECIAL HANDLING FOR NON-HREF CLICKABLE ELEMENTS ==========
           // If this is a button/role=button/onclick without a detected URL source, log as INFO (not testable)
@@ -4671,6 +4975,35 @@ async function validateMissingHrefClickNavigation(page, requestContext, selector
             }
           }
           // ========== END ANGULAR CLASSIFICATION ==========
+
+          if (link.clickValidationType === 'consent-popup' && link.clickSelector) {
+            const consentValidation = await validateConsentPopup(page, link.clickSelector, text);
+            logResult(
+              stepDesc,
+              'Consent popup displays the expected TrustArc panel',
+              consentValidation.passed ? 'TrustArc consent popup displayed' : 'Consent popup not detected',
+              consentValidation.passed ? 'PASS' : 'FAIL',
+              consentValidation.error || '',
+              0,
+              baseUrl,
+              consentValidation.finalUrl || href,
+              'N/A',
+              'N/A',
+              'No',
+              text,
+              target || 'Same Window',
+              'No',
+              'Consent popup link',
+              angularClassification,
+              hasNgxWrapper,
+              hasSpecialAttrs,
+              isRichText
+            );
+            console.log(consentValidation.passed
+              ? `   ✅ Consent popup validated: "${text.substring(0, 60)}"`
+              : `   ❌ Consent popup validation failed: "${text.substring(0, 60)}" — ${consentValidation.error}`);
+            continue;
+          }
 
           if (link.shouldClickValidate && link.clickSelector) {
             const clickValidation = await validateMissingHrefClickNavigation(page, requestContext, link.clickSelector, baseUrl, text, rawHref || '');
