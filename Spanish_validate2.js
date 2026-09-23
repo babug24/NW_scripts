@@ -69,7 +69,8 @@ const SPANISH_WORDS = [
   'Granja y rancho','Comercial','Seguridad y prevención de riesgos','Ag Insight Center','Fundada por agricultores',
   'Agent resources','Explore products','Industry insights','Become appointed',
   'Iniciar sesión','Agricultura y ganadería','Comercial','Seguridad y gestión de riesgos','Centro de información agrícola','Fundado por agricultores',
-  'A nivel nacional Cliente privado','Productos','Solicitudes y formularios','Presupuestos y servicio','Recursos','Sobre nosotros'
+  'A nivel nacional Cliente privado','Productos','Solicitudes y formularios','Presupuestos y servicio','Recursos','Sobre nosotros',
+  'Arma un paquete de seguro y ahorra dinero'
 ];
 
 // ============================================================
@@ -432,7 +433,7 @@ async function extractMainContent(page, count = SAMPLE_COUNT, debug = false) {
 
       function isUIElement(el) {
         const tag = el.tagName.toLowerCase();
-        if (['header', 'footer', 'nav', 'aside'].includes(tag)) return true;
+        if (['header', 'footer', 'nav', 'aside', 'script', 'style', 'noscript', 'link', 'meta', 'svg', 'template', 'button', 'input', 'select', 'textarea'].includes(tag)) return true;
         const id = (el.id || '').toLowerCase();
         const cls = getClassString(el).toLowerCase();
         const uiPatterns = ['nav', 'menu', 'sidebar', 'breadcrumb', 'toolbar', 'topbar', 'header', 'footer'];
@@ -516,6 +517,7 @@ function escapeRegex(str) {
 
 const MIN_MATCHES_TO_PASS = 1;
 const MIN_DISTINCT_WORDS_FOR_AUTO_PASS = 2;
+const STRONG_KEYWORD_OVERRIDE_COUNT = 10;
 
 function hasSpanishContent(samples) {
   if (!samples || samples.length === 0) {
@@ -639,8 +641,9 @@ async function runLayeredValidation(page, samples, currentUrl) {
     urlSignal.pass;
 
   let overallPass = autoPass || (signalsTotal > 0 && confidenceScore >= threshold);
-  // never pass if franc confidently detected the content itself as English, regardless of URL/keyword signals
-  if (contentLangCheck.pass === false) {
+  // franc can misclassify pages with lots of boilerplate/numeric text; only trust its "English" call
+  // as an override when keyword evidence is also weak, otherwise strong keyword matches win
+  if (contentLangCheck.pass === false && keywordCheck.totalFound < STRONG_KEYWORD_OVERRIDE_COUNT) {
     overallPass = false;
   }
 
@@ -724,11 +727,11 @@ async function clickAndWaitForLanguagePage(page, linkHandle, debug = false) {
   return null;
 }
 
-async function refreshSpanishPage(page) {
+async function refreshSpanishPage(page, options = {}) {
   console.log('   Clearing browser cache...');
   await clearBrowserCache(page);
 
-  const hasContent = await page.evaluate(() => {
+  const hasContent = !options.force && await page.evaluate(() => {
     const root = document.querySelector('app-root');
     return root && root.textContent.trim().length > 100;
   }).catch(() => false);
@@ -763,6 +766,31 @@ async function refreshSpanishPage(page) {
   } catch (_) {
     console.warn('   ⚠️  Content not visible after refresh, proceeding anyway.');
   }
+}
+
+// Angular routes can still be mid-render right after navigation/reload; retry a couple times
+// if the sample looks weak before accepting it as the final content for validation.
+async function extractSamplesWithRetry(page, count = SAMPLE_COUNT, debug = false, attempts = 3, delayMs = 2500) {
+  let samples = [];
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    samples = await extractMainContent(page, count, debug);
+    if (debug) {
+      console.log(`   Debug: attempt ${attempt} extracted ${samples.length} sample(s). Preview: ${(samples[0] || '(none)').slice(0, 200)}`);
+    }
+    if (samples.length === 0) continue;
+
+    const keywordCheck = hasSpanishContent(samples);
+    if (keywordCheck.totalFound >= STRONG_KEYWORD_OVERRIDE_COUNT) break;
+
+    const combinedText = samples.join(' \n ');
+    const contentLangCheck = await detectContentLanguageFranc(combinedText);
+    const looksSettled = contentLangCheck.pass !== false || keywordCheck.totalFound > 0;
+    if (looksSettled || attempt === attempts) break;
+
+    console.log(`   ⏳ Content looks unsettled (attempt ${attempt}/${attempts}), waiting and re-sampling...`);
+    await new Promise(r => setTimeout(r, delayMs));
+  }
+  return samples;
 }
 
 async function applyLayeredValidation(page, samples, result, currentUrl) {
@@ -823,6 +851,14 @@ async function validateSpanishConversion(url, browser, debug = false) {
     page.setDefaultTimeout(60000);
     page.setDefaultNavigationTimeout(60000);
     await page.setViewport({ width: 1280, height: 800 });
+    // some sites serve unhydrated/English fallback content to detected headless browsers
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+      Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+      Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+      window.chrome = window.chrome || { runtime: {} };
+    });
 
     // Clear cache (best effort)
     try {
@@ -922,8 +958,8 @@ async function validateSpanishConversion(url, browser, debug = false) {
         }
       }
 
-      await refreshSpanishPage(page);
-      const samples = await extractMainContent(page, SAMPLE_COUNT, debug);
+      await refreshSpanishPage(page, { force: true });
+      const samples = await extractSamplesWithRetry(page, SAMPLE_COUNT, debug);
       if (samples.length === 0) {
         result.details = 'No content after direct Spanish href navigation';
         result.status = 'FAIL';
@@ -986,7 +1022,7 @@ async function validateSpanishConversion(url, browser, debug = false) {
     }
 
     await refreshSpanishPage(targetPage);
-    const samples = await extractMainContent(targetPage, SAMPLE_COUNT, debug);
+    const samples = await extractSamplesWithRetry(targetPage, SAMPLE_COUNT, debug);
     if (samples.length === 0) {
       result.details = 'No content after navigation';
       result.status = 'FAIL';
@@ -1028,6 +1064,11 @@ async function runValidationConcurrent(urls, debug = false, concurrency = CONCUR
              String(now.getSeconds()).padStart(2, '0');
   const excelPath = path.join(REPORTS_DIR, `spanish_conversion_report_${ts}.xlsx`);
 
+  // a prior run that crashed or was killed can leave these locks behind, blocking new launches
+  for (const lockFile of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
+    try { fs.unlinkSync(path.join(PROFILE_DIR, lockFile)); } catch (_) {}
+  }
+
   // Launch a single browser with persistent profile (no temp files)
   const browser = await puppeteer.launch({
     headless: !debug,
@@ -1046,6 +1087,7 @@ async function runValidationConcurrent(urls, debug = false, concurrency = CONCUR
       '--disable-component-update',
       '--disable-domain-reliability',
       '--disable-extensions',
+      '--disable-blink-features=AutomationControlled',
       '--disable-features=AudioServiceOutOfProcess,IsolateOrigins,site-per-process,MetricsReporting',
       '--disable-ipc-flooding-protection',
       '--disable-notifications',
@@ -1068,6 +1110,11 @@ async function runValidationConcurrent(urls, debug = false, concurrency = CONCUR
 
   console.log(`🚀 Launched browser with persistent profile: ${PROFILE_DIR}`);
   console.log(`   Processing ${urls.length} URLs with concurrency ${concurrency}`);
+
+  const closeBrowser = async () => { try { await browser.close(); } catch (_) {} };
+  const onSignal = () => { closeBrowser().finally(() => process.exit(1)); };
+  process.once('SIGINT', onSignal);
+  process.once('SIGTERM', onSignal);
 
   // Helper to save Excel
   function saveExcel() {
@@ -1092,6 +1139,7 @@ async function runValidationConcurrent(urls, debug = false, concurrency = CONCUR
   const pending = [];
   let completed = 0;
 
+  try {
   while (index < urls.length || pending.length > 0) {
     // Fill the pool
     while (pending.length < concurrency && index < urls.length) {
@@ -1151,9 +1199,12 @@ async function runValidationConcurrent(urls, debug = false, concurrency = CONCUR
   // Final save
   saveExcel();
   console.log(`\n✅ All ${urls.length} URL(s) processed. Final report: ${excelPath}`);
-
-  await browser.close();
-  console.log('🔒 Browser closed.');
+  } finally {
+    process.removeListener('SIGINT', onSignal);
+    process.removeListener('SIGTERM', onSignal);
+    await closeBrowser();
+    console.log('🔒 Browser closed.');
+  }
 }
 
 // ============================================================
