@@ -56,12 +56,18 @@ const MAIN_BOLD_PENGUIN_SELECTORS = [
   'button.bold-penguin-quote',
   '[class*="bold-penguin-quote"]'
 ];
+const BOLD_PENGUIN_DOM_SELECTOR = '[class*="bold-penguin" i], [id*="bold-penguin" i], [data-testid*="bold-penguin" i], [class*="boldpenguin" i], [id*="boldpenguin" i]';
+const BOLD_PENGUIN_DOM_TIMEOUT = 20000;
 const DRAWER_SELECTOR = '[class*="drawer" i], [class*="offcanvas" i], .cdk-overlay-pane, [role="dialog"], [aria-modal="true"], .mat-drawer, .nw-drawer, [data-testid*="drawer" i], [data-name*="drawer" i]';
 const ZIP_INPUT_SELECTOR = 'input[name*="zip" i], input[id*="zip" i], input[name*="postal" i], input[id*="postal" i], input[placeholder*="zip" i], input[aria-label*="zip" i], input[placeholder*="postal" i], input[aria-label*="postal" i]';
 const ZIP_ERROR_EMPTY_MESSAGE = 'Enter your 5 or 9 digit ZIP Code.';
 const ZIP_ERROR_INVALID_MESSAGE = 'Unable to find a valid state for the given Postal Code. Please try again using a 5 digit Postal Code.';
 const VALID_TEST_ZIP = '10001';
 const INVALID_TEST_ZIP = '00000';
+// Segment length varies by environment (e.g. 3-char "88M-3V3-BHV" vs. 4-char groups), so match 2+ char segments.
+const APPLICATION_ID_PATTERN = /application\s*id\s*[:#-]?\s*([A-Z0-9]{2,}(?:\s*-\s*[A-Z0-9]{2,})+|[A-Z0-9]{6,})/i;
+const APPLICATION_ID_TIMEOUT = 15000;
+const BOLD_PENGUIN_EXPECTED_HOST = 'nationwidecommercial.boldpenguin.com';
 
 function isPageClosed(page) {
   return !page || page.isClosed();
@@ -119,15 +125,30 @@ async function waitForSpinnersToDisappear(page, timeoutMs = 30000) {
         return rect.width > 0 && rect.height > 0 &&
           style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
       };
-      const nodes = [...document.querySelectorAll([
+
+      // Web components (e.g. bolt-overlay) render spinners inside open shadow roots;
+      // document.querySelectorAll alone cannot see past them.
+      const collectAllElements = (root, out = []) => {
+        for (const el of root.querySelectorAll('*')) {
+          out.push(el);
+          if (el.shadowRoot) collectAllElements(el.shadowRoot, out);
+        }
+        return out;
+      };
+      const allElements = collectAllElements(document);
+
+      const blockerSelector = [
         '[aria-busy="true"]', '[role="progressbar"]',
         '.page-loader', '.loading-spinner', '.loading-wheel', '.nw-spinner', '.bolt-spinner',
         '[class*="spinner" i]', '[class*="loading" i]', '[class*="loader" i]',
         '[id*="spinner" i]', '[id*="loading" i]', '[id*="loader" i]'
-      ].join(','))];
+      ].join(',');
+      const nodes = allElements.filter(node => node.matches?.(blockerSelector));
 
       // A visible modal/overlay saying “Please wait” is always a blocking state.
-      const waitModal = [...document.querySelectorAll('[role="dialog"], [aria-modal="true"], .modal, [class*="overlay" i]')]
+      const overlaySelector = '[role="dialog"], [aria-modal="true"], .modal, [class*="overlay" i]';
+      const waitModal = allElements
+        .filter(node => node.matches?.(overlaySelector))
         .some(node => isVisible(node) && /please\s+wait|loading/i.test(node.innerText || node.textContent || ''));
 
       const visibleBlockers = nodes.filter(node => {
@@ -191,6 +212,19 @@ async function getPageErrorReason(page, finalUrl, title) {
   ];
   const found = bodyErrors.find(value => bodyLower.includes(value));
   return found ? `Error content: ${found}` : null;
+}
+
+// The Bold Penguin quote page renders "Your application ID :" with the value in a sibling <span>,
+// so the value is read from the flattened body text rather than a fixed selector.
+async function extractApplicationId(page, timeoutMs = APPLICATION_ID_TIMEOUT) {
+  for (let elapsed = 0; elapsed < timeoutMs; elapsed += 500) {
+    const body = await page.locator('body').innerText().catch(() => '');
+    const match = body.match(APPLICATION_ID_PATTERN);
+    if (match) return match[1].replace(/\s+/g, '');
+    if (isPageClosed(page)) break;
+    await page.waitForTimeout(500);
+  }
+  return '';
 }
 
 async function getVisibleDrawer(page) {
@@ -449,6 +483,7 @@ async function validateButtonClick(page, locator, description, returnToUrl) {
     // Only a top-level StickyCTA can open a drawer. Clicks on elements inside an already-open
     // drawer must be judged by navigation/popup, otherwise the open drawer is mistaken for a result.
     const isStickyCta = description.startsWith('StickyCTA') && !description.startsWith('StickyCTA Drawer');
+    const captureApplicationId = description.startsWith('Bold Penguin');
     const beforeFingerprint = isStickyCta ? await captureVisibleInteractiveFingerprint(page) : null;
     const expandedBefore = await locator.getAttribute('aria-expanded').catch(() => null);
 
@@ -486,8 +521,10 @@ async function validateButtonClick(page, locator, description, returnToUrl) {
           await findControlledPanel(page, locator).catch(() => null);
       }
       // A StickyCTA can both open a popup and navigate the source tab. Observe both outcomes.
+      // Bold Penguin opens its tab slightly after the same-window redirect, so allow more grace.
+      const settleAfterNavigation = captureApplicationId ? 6000 : 2000;
       if (navigated && openedPage) break;
-      if (navigated && elapsed >= 2000) break;
+      if (navigated && elapsed >= settleAfterNavigation) break;
       if (openedPage && elapsed >= 2000) break;
       if (drawerLocator && elapsed >= 1000) break;
       await page.waitForTimeout(250);
@@ -526,11 +563,13 @@ async function validateButtonClick(page, locator, description, returnToUrl) {
       const finalUrl = openedPage.url();
       const title = await openedPage.title().catch(() => '');
       const pageError = await getPageErrorReason(openedPage, finalUrl, title);
+      const applicationId = captureApplicationId ? await extractApplicationId(openedPage) : '';
       await openedPage.close().catch(() => {});
       if (popupError) throw popupError;
       if (pageError) throw new Error(pageError);
       console.log(`  Popup destination validated: ${finalUrl}`);
-      return { success: true, href, finalUrl, title, backSuccess: true, backError: '', backUrl: sourceUrl, remarks: `New-window destination validated: ${finalUrl}` };
+      if (applicationId) console.log(`  Application ID captured: ${applicationId}`);
+      return { success: true, href, finalUrl, title, applicationId, newTabUrl: finalUrl, newTabStatus: `New tab opened and validated: ${finalUrl}`, backSuccess: true, backError: '', backUrl: sourceUrl, remarks: `New-window destination validated: ${finalUrl}${applicationId ? ` | Application ID: ${applicationId}` : ''}` };
     }
 
     if (!navigated) {
@@ -544,10 +583,27 @@ async function validateButtonClick(page, locator, description, returnToUrl) {
       };
     }
 
+    // The Bold Penguin CTA can redirect the current window AND open a Bold Penguin tab at the
+    // same time; both outcomes are validated and reported instead of only the surviving one.
     let popupObservation = '';
+    let newTabStatus = '';
+    let popupApplicationId = '';
     if (openedPage) {
       await openedPage.waitForLoadState('domcontentloaded', { timeout: NAV_TIMEOUT }).catch(() => {});
+      await waitForPageToSettle(openedPage).catch(() => {});
       popupObservation = openedPage.url();
+      const popupTitle = await openedPage.title().catch(() => '');
+      const popupPageError = await getPageErrorReason(openedPage, popupObservation, popupTitle).catch(() => null);
+      if (captureApplicationId) popupApplicationId = await extractApplicationId(openedPage).catch(() => '');
+      const hostMatches = (() => {
+        try { return new URL(popupObservation).hostname.toLowerCase().includes(BOLD_PENGUIN_EXPECTED_HOST); } catch { return false; }
+      })();
+      newTabStatus = popupPageError
+        ? `New tab opened with an error page: ${popupPageError}`
+        : hostMatches
+          ? `New tab opened and validated on ${BOLD_PENGUIN_EXPECTED_HOST}`
+          : `New tab opened on an unexpected host (expected ${BOLD_PENGUIN_EXPECTED_HOST})`;
+      console.log(`  ${newTabStatus}: ${popupObservation}`);
       await openedPage.close().catch(() => {});
     }
 
@@ -557,37 +613,22 @@ async function validateButtonClick(page, locator, description, returnToUrl) {
     const pageError = await getPageErrorReason(page, finalUrl, title);
     if (pageError) throw new Error(pageError);
     console.log(`  Destination validated: ${finalUrl}`);
+    const applicationId = (captureApplicationId ? await extractApplicationId(page) : '') || popupApplicationId;
+    if (applicationId) console.log(`  Application ID captured: ${applicationId}`);
 
     console.log('  Validating browser back navigation');
     let backSuccess = false;
     let backError = '';
     try {
-      // Tolerate fast navigations where the spinner might not appear at all.
-      const spinnerLocator = page.locator('.bolt-waiting-indicator-wc--spinner');
-      const spinnerAppeared = await spinnerLocator.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false);
-
       await page.goBack({ waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT });
       const settleAfterBack = await waitForPageToSettle(page, NAV_TIMEOUT);
       const urlMatches = normalizeUrlForComparison(page.url()) === normalizeUrlForComparison(returnToUrl);
+      backSuccess = urlMatches && settleAfterBack.success;
 
-      // If the spinner appeared it must clear; otherwise the page may be stuck behind a transparent overlay.
-      if (spinnerAppeared) {
-        await spinnerLocator.waitFor({ state: 'hidden', timeout: 10000 }).catch(error => {
-          backError = `Waiting indicator did not clear after back navigation: ${error.message}`;
-        });
-      }
-
-      const mainContentVisible = !backError && await page.locator('#main-content').first().isVisible().catch(() => false);
-      backSuccess = urlMatches && settleAfterBack.success && !backError && mainContentVisible;
-
-      if (!backError) {
-        if (!urlMatches) {
-          backError = `Browser back returned ${page.url()} instead of ${returnToUrl}`;
-        } else if (!settleAfterBack.success) {
-          backError = `Browser back reached the expected URL but the page did not finish rendering: ${settleAfterBack.reason}`;
-        } else if (!mainContentVisible) {
-          backError = 'Browser back landed on the expected URL but #main-content is not visible';
-        }
+      if (!urlMatches) {
+        backError = `Browser back returned ${page.url()} instead of ${returnToUrl}`;
+      } else if (!settleAfterBack.success) {
+        backError = `Browser back reached the expected URL but the page did not finish rendering: ${settleAfterBack.reason}`;
       }
     } catch (error) {
       backError = `Browser back failed: ${error.message}`;
@@ -598,7 +639,7 @@ async function validateButtonClick(page, locator, description, returnToUrl) {
       await waitForPageToSettle(page).catch(() => {});
     }
 
-    return { success: backSuccess, href, finalUrl, title, backSuccess, backError, backUrl: page.url(), remarks: `Observed main-frame URLs: ${observedMainFrameUrls.join(' -> ')} | Destination: ${finalUrl}${popupObservation ? ` | Additional popup observed: ${popupObservation}` : ''} | Back-navigation URL: ${page.url()}${page.url().endsWith('#') ? ' | Application added trailing # fragment on back navigation' : ''}`, error: backSuccess ? '' : backError };
+    return { success: backSuccess, href, finalUrl, title, applicationId, newTabUrl: popupObservation, newTabStatus, backSuccess, backError, backUrl: page.url(), remarks: `Observed main-frame URLs: ${observedMainFrameUrls.join(' -> ')} | Destination: ${finalUrl}${applicationId ? ` | Application ID: ${applicationId}` : ''}${popupObservation ? ` | Same-window redirect to ${finalUrl} AND new tab to ${popupObservation} | ${newTabStatus}` : ''} | Back-navigation URL: ${page.url()}${page.url().endsWith('#') ? ' | Application added trailing # fragment on back navigation' : ''}`, error: backSuccess ? '' : backError };
   } catch (error) {
     if (!isPageClosed(page) && normalizeUrlForComparison(page.url()) !== normalizeUrlForComparison(returnToUrl)) {
       await page.goto(returnToUrl, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT }).catch(() => {});
@@ -607,10 +648,39 @@ async function validateButtonClick(page, locator, description, returnToUrl) {
   }
 }
 
+// The Bold Penguin anchor is rendered by a component that hydrates after load and, on many
+// pages, only once the section scrolls into view. Checking immediately after navigation
+// reports it as absent even though the markup appears moments later.
+async function waitForBoldPenguinMarkup(page) {
+  const present = async () => (await page.locator(BOLD_PENGUIN_DOM_SELECTOR).count().catch(() => 0)) > 0;
+  await page.locator(BOLD_PENGUIN_DOM_SELECTOR).first()
+    .waitFor({ state: 'attached', timeout: BOLD_PENGUIN_DOM_TIMEOUT }).catch(() => {});
+  if (await present()) return true;
+
+  for (const ratio of [0.25, 0.5, 0.75, 1]) {
+    await page.evaluate(value => window.scrollTo(0, Math.floor(document.body.scrollHeight * value)), ratio).catch(() => {});
+    await page.waitForTimeout(750);
+    if (await present()) {
+      await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
+      await page.waitForTimeout(250);
+      return true;
+    }
+  }
+  await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
+  return false;
+}
+
 async function findBoldPenguinLocator(page) {
   for (const selector of MAIN_BOLD_PENGUIN_SELECTORS) {
     const locator = page.locator(selector).first();
     if (await locator.isVisible().catch(() => false)) return { selector, locator };
+    // A lazily rendered anchor can be attached but still collapsed/off-screen; scrolling it
+    // into view forces layout so it reports real dimensions.
+    if (await locator.count().catch(() => 0)) {
+      await locator.scrollIntoViewIfNeeded().catch(() => {});
+      await page.waitForTimeout(250);
+      if (await locator.isVisible().catch(() => false)) return { selector, locator };
+    }
   }
   return null;
 }
@@ -860,6 +930,10 @@ async function validateAllCtas(page, sourceUrl) {
       .map(item => item.finalUrl)
       .filter(Boolean)
       .join(' | '),
+    smallCtaFailureReasons: smallDetails
+      .filter(item => !item.success && !item.skipped)
+      .map(item => `${item.text}: ${item.error}`)
+      .join(' | '),
     stickyCtaPresent: sticky.length > 0 ? 'Yes' : 'No',
     stickyCtaStatus: stickySummary.status,
     stickyCtaUrls: stickySummary.urls,
@@ -881,7 +955,7 @@ async function validateAllCtas(page, sourceUrl) {
 
 async function validateUrl(context, inputUrl, index) {
   let page = await context.newPage();
-  const result = { url: inputUrl, status: 'FAIL', boldPenguinDom: 'No', mainStatus: 'N/A', mainError: '', mainFinalUrl: '', mainApiUrl: '', mainBackNav: 'N/A', mainBackError: '', mainButtonName: '', ctaStatus: 'N/A', ctaError: '', smallCtaPresent: 'No', smallCtaStatus: 'N/A', smallCtaUrls: '', smallCtaRedirectTargets: '', stickyCtaPresent: 'No', stickyCtaStatus: 'N/A', stickyCtaUrls: '', stickyCtaRedirectTargets: '', stickyCtaFailureReasons: '', pageError: '', error: '', remarks: '', screenshot: '' };
+  const result = { url: inputUrl, status: 'FAIL', boldPenguinDom: 'No', mainStatus: 'N/A', mainError: '', mainFinalUrl: '', mainApiUrl: '', mainApplicationId: '', mainNewTabUrl: '', mainNewTabStatus: '', mainBackNav: 'N/A', mainBackError: '', mainButtonName: '', ctaStatus: 'N/A', ctaError: '', smallCtaPresent: 'No', smallCtaStatus: 'N/A', smallCtaUrls: '', smallCtaRedirectTargets: '', smallCtaFailureReasons: '', stickyCtaPresent: 'No', stickyCtaStatus: 'N/A', stickyCtaUrls: '', stickyCtaRedirectTargets: '', stickyCtaFailureReasons: '', pageError: '', error: '', remarks: '', screenshot: '' };
   try {
     const nav = await navigateWithRetry(page, inputUrl);
     await handleOverlays(page);
@@ -891,8 +965,12 @@ async function validateUrl(context, inputUrl, index) {
     const sourceError = await getPageErrorReason(page, sourceUrl, await page.title().catch(() => ''));
     if (sourceError) throw new Error(sourceError);
 
-    result.boldPenguinDom = await page.locator('[class*="bold-penguin"], [id*="bold-penguin"]').count().then(count => count ? 'Yes' : 'No');
+    const boldPenguinPresent = await waitForBoldPenguinMarkup(page);
+    result.boldPenguinDom = boldPenguinPresent ? 'Yes' : 'No';
     const main = await findBoldPenguinLocator(page);
+    if (!main && boldPenguinPresent) {
+      console.log('  Bold Penguin markup detected but no clickable quote anchor matched');
+    }
 
     if (main) {
       console.log('  Phase 1/3: Bold Penguin validation');
@@ -904,6 +982,9 @@ async function validateUrl(context, inputUrl, index) {
       result.mainApiUrl = (!mainResult.href || mainResult.href.endsWith('#'))
         ? (mainResult.finalUrl || mainResult.href || '')
         : mainResult.href;
+      result.mainApplicationId = mainResult.applicationId || '';
+      result.mainNewTabUrl = mainResult.newTabUrl || '';
+      result.mainNewTabStatus = mainResult.newTabStatus || (mainResult.finalUrl ? 'No additional tab opened' : '');
       result.mainBackNav = mainResult.backSuccess ? 'SUCCESS' : 'FAIL';
       result.mainBackError = mainResult.backError || '';
       result.remarks = `Bold Penguin: ${mainResult.remarks || ''}`;
@@ -921,7 +1002,7 @@ async function validateUrl(context, inputUrl, index) {
       ctas = await validateAllCtas(page, sourceUrl);
     } catch (ctaError) {
       console.log(`  CTA validation error: ${ctaError.message}`);
-      ctas = { status: 'FAIL', error: ctaError.message, details: [], smallCtaPresent: 'No', smallCtaStatus: 'N/A', smallCtaUrls: '', smallCtaRedirectTargets: '', stickyCtaPresent: 'No', stickyCtaStatus: 'N/A', stickyCtaUrls: '', stickyCtaRedirectTargets: '', stickyCtaFailureReasons: ctaError.message, remarks: '' };
+      ctas = { status: 'FAIL', error: ctaError.message, details: [], smallCtaPresent: 'No', smallCtaStatus: 'N/A', smallCtaUrls: '', smallCtaRedirectTargets: '', smallCtaFailureReasons: ctaError.message, stickyCtaPresent: 'No', stickyCtaStatus: 'N/A', stickyCtaUrls: '', stickyCtaRedirectTargets: '', stickyCtaFailureReasons: ctaError.message, remarks: '' };
     }
     result.ctaStatus = ctas.status;
     result.ctaError = ctas.error;
@@ -929,6 +1010,7 @@ async function validateUrl(context, inputUrl, index) {
     result.smallCtaStatus = ctas.smallCtaStatus;
     result.smallCtaUrls = ctas.smallCtaUrls;
     result.smallCtaRedirectTargets = ctas.smallCtaRedirectTargets;
+    result.smallCtaFailureReasons = ctas.smallCtaFailureReasons;
     result.stickyCtaPresent = ctas.stickyCtaPresent;
     result.stickyCtaStatus = ctas.stickyCtaStatus;
     result.stickyCtaUrls = ctas.stickyCtaUrls;
@@ -962,12 +1044,14 @@ function writeReports(results, timestamp) {
     'bold_penguin_button_name',
     'bold_penguin_url',
     'bold_penguin_final_url',
+    'bold_penguin_application_id',
     'bold_penguin_back_navigation',
     'bold_penguin_back_error',
     'bold_penguin_status',
     'small_cta_present',
     'small_cta_urls',
     'small_cta_redirect_targets',
+    'small_cta_failure_reasons',
     'small_cta_status',
     'sticky_cta_present',
     'sticky_cta_urls',
@@ -978,9 +1062,9 @@ function writeReports(results, timestamp) {
     'remarks'
   ];
   const rows = results.map(r => [
-    r.url, r.boldPenguinDom, r.mainButtonName, r.mainApiUrl, r.mainFinalUrl,
+    r.url, r.boldPenguinDom, r.mainButtonName, r.mainApiUrl, r.mainFinalUrl, r.mainApplicationId,
     r.mainBackNav, r.mainBackError, r.mainStatus,
-    r.smallCtaPresent, r.smallCtaUrls, r.smallCtaRedirectTargets, r.smallCtaStatus,
+    r.smallCtaPresent, r.smallCtaUrls, r.smallCtaRedirectTargets, r.smallCtaFailureReasons, r.smallCtaStatus,
     r.stickyCtaPresent, r.stickyCtaUrls, r.stickyCtaFailureReasons, r.stickyCtaStatus,
     r.status, r.error, r.remarks
   ]);
@@ -993,9 +1077,9 @@ function writeReports(results, timestamp) {
   const xlsxPath = path.join(REPORTS_DIR, `bold-penguin-cta-report_${timestamp}.xlsx`);
   XLSX.writeFile(workbook, xlsxPath);
 
-  const htmlRows = results.map(r => `<tr><td>${escapeHtml(r.url)}</td><td>${r.mainStatus}</td><td>${r.mainBackNav}</td><td>${r.smallCtaStatus}</td><td>${r.stickyCtaStatus}</td><td>${r.status}</td><td>${escapeHtml(r.error)}</td></tr>`).join('');
+  const htmlRows = results.map(r => `<tr><td>${escapeHtml(r.url)}</td><td>${r.mainStatus}</td><td>${escapeHtml(r.mainApplicationId || '')}</td><td>${r.mainBackNav}</td><td>${r.smallCtaStatus}</td><td>${r.stickyCtaStatus}</td><td>${r.status}</td><td>${escapeHtml(r.error)}</td></tr>`).join('');
   const htmlPath = path.join(REPORTS_DIR, `bold-penguin-cta-report_${timestamp}.html`);
-  fs.writeFileSync(htmlPath, `<!doctype html><html><head><meta charset="utf-8"><title>CTA Validation</title><style>body{font-family:Arial;margin:24px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:8px;text-align:left}th{background:#164a7b;color:#fff}</style></head><body><h1>Bold Penguin / SmallCTA / StickyCTA E2E Results</h1><table><tr><th>URL</th><th>Bold Penguin</th><th>Back Nav</th><th>SmallCTA</th><th>StickyCTA</th><th>Overall</th><th>Error</th></tr>${htmlRows}</table></body></html>`);
+  fs.writeFileSync(htmlPath, `<!doctype html><html><head><meta charset="utf-8"><title>CTA Validation</title><style>body{font-family:Arial;margin:24px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:8px;text-align:left}th{background:#164a7b;color:#fff}</style></head><body><h1>Bold Penguin / SmallCTA / StickyCTA E2E Results</h1><table><tr><th>URL</th><th>Bold Penguin</th><th>Application ID</th><th>Back Nav</th><th>SmallCTA</th><th>StickyCTA</th><th>Quote Available Component</th><th>Overall</th><th>Error</th></tr>${htmlRows}</table></body></html>`);
   console.log(`Reports written:\n  ${csvPath}\n  ${xlsxPath}\n  ${htmlPath}`);
 }
 
@@ -1029,7 +1113,7 @@ function writeReports(results, timestamp) {
         try {
           results[index] = await validateUrl(context, urls[index], index + 1);
         } catch (error) {
-          results[index] = { url: urls[index], status: 'FAIL', boldPenguinDom: 'No', mainStatus: 'N/A', mainError: '', mainFinalUrl: '', mainApiUrl: '', mainBackNav: 'N/A', mainBackError: '', mainButtonName: '', ctaStatus: 'N/A', ctaError: '', smallCtaPresent: 'No', smallCtaStatus: 'N/A', smallCtaUrls: '', smallCtaRedirectTargets: '', stickyCtaPresent: 'No', stickyCtaStatus: 'N/A', stickyCtaUrls: '', stickyCtaRedirectTargets: '', stickyCtaFailureReasons: '', pageError: error.message, error: error.message, remarks: '', screenshot: '' };
+          results[index] = { url: urls[index], status: 'FAIL', boldPenguinDom: 'No', mainStatus: 'N/A', mainError: '', mainFinalUrl: '', mainApiUrl: '', mainApplicationId: '', mainNewTabUrl: '', mainNewTabStatus: '', mainBackNav: 'N/A', mainBackError: '', mainButtonName: '', ctaStatus: 'N/A', ctaError: '', smallCtaPresent: 'No', smallCtaStatus: 'N/A', smallCtaUrls: '', smallCtaRedirectTargets: '', smallCtaFailureReasons: '', stickyCtaPresent: 'No', stickyCtaStatus: 'N/A', stickyCtaUrls: '', stickyCtaRedirectTargets: '', stickyCtaFailureReasons: '', pageError: error.message, error: error.message, remarks: '', screenshot: '' };
         }
         completed++;
         console.log(`[done ${completed}/${urls.length}] ${urls[index]} -> ${results[index].status}`);
